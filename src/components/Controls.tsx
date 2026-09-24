@@ -73,7 +73,11 @@ export default function Controls({ snap, ctrl }: { snap: Snapshot; ctrl: TimerCo
       </div>
       <IntervalEditor snap={snap} ctrl={ctrl} />
       {off && snap.joined && snap.status === 'ready' && !snap.busy && (
-        <p className="muted small">Controls unlock once the clock has synced.</p>
+        <p className="muted small">
+          {snap.mode === 'firebase' && !snap.connected
+            ? 'Offline: controls come back when the connection does.'
+            : 'Controls unlock once the clock has synced.'}
+        </p>
       )}
     </section>
   );

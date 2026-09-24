@@ -188,6 +188,17 @@ export function applyOp(t: TimerCore, op: TimerOp, now: number): TimerCore {
   }
 }
 
+/**
+ * The moment an op is applied at: the click, but never before the state it applies to (a teammate's
+ * write that landed between our click and our write). A start/raided anchor is a click moment, not a
+ * future raid, so an op must not treat it as a pending zero either.
+ */
+export function opTime(cur: TimerState, clickNow: number): number {
+  let at = Math.max(clickNow, cur.updatedAt);
+  if (cur.running && (cur.action === 'start' || cur.action === 'raided')) at = Math.max(at, cur.anchorMs);
+  return at;
+}
+
 /** Raids (chimes) after fromMs and at or before toMs, for counting raids missed during a freeze or sleep. */
 export function zerosBetween(t: TimerCore, fromMs: number, toMs: number): number {
   if (!t.running || toMs <= fromMs) return 0;

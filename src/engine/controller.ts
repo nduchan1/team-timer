@@ -8,7 +8,7 @@ import { ClockSync, type ClockQuality } from '../lib/clockSync.ts';
 import { formatAgo, formatClock, formatCountdown, formatSpan } from '../lib/format.ts';
 import { loadPrefs, rememberRoom, savePrefs, type Prefs } from '../lib/prefs.ts';
 import { randomId } from '../lib/roomId.ts';
-import { applyOp, opCreate, timerView, zerosBetween, type Phase, type TimerAction, type TimerOp, type TimerState } from '../lib/timerMath.ts';
+import { applyOp, opCreate, opTime, timerView, zerosBetween, type Phase, type TimerAction, type TimerOp, type TimerState } from '../lib/timerMath.ts';
 import { firebaseConfigured, getDb } from '../sync/firebase.ts';
 import { createFirebaseSync } from '../sync/firebaseAdapter.ts';
 import { createLocalSync } from '../sync/localAdapter.ts';
@@ -288,7 +288,7 @@ export class TimerController {
   }
 
   act(op: TimerOp): Promise<void> {
-    return this.write((cur, now) => (cur ? applyOp(cur, op, now) : null), op.kind);
+    return this.write((cur, clickNow) => (cur ? applyOp(cur, op, opTime(cur, clickNow)) : null), op.kind);
   }
 
   dispose(): void {
@@ -301,6 +301,7 @@ export class TimerController {
     audio.cancel('warn', this.clientId);
     this.listeners.clear();
     if (this.toastTimer) clearTimeout(this.toastTimer);
+    document.title = 'Team Timer';
   }
 
   // ---- internals ------------------------------------------------------------------------------
@@ -353,7 +354,9 @@ export class TimerController {
       // A teammate's click lands a few ms "in the future" on a client whose clock estimate lags
       // theirs. The click itself is not a raid moment, so never chime for it.
       if (t.running && (t.action === 'start' || t.action === 'raided') && t.anchorMs > from && t.anchorMs - now < 2000) {
-        from = t.anchorMs;
+        // ...unless our own pending raid of the previous state falls before it: that one must still chime.
+        const prevNext = prev?.running ? timerView(prev, from).nextZeroMs : null;
+        if (prevNext === null || prevNext > t.anchorMs) from = t.anchorMs;
       }
     }
     // Zeros are judged against one state only: a change is not a raid moment.
@@ -440,7 +443,7 @@ export class TimerController {
       audioRunning: audio.running,
     });
     if (r.playLate) {
-      audio.playNow(this.prefs.preset);
+      audio.playNow(this.prefs.preset, lastZero);
       this.log(`raid chime played late (${(now - lastZero).toFixed(0)} ms)`);
     } else if (r.played) {
       this.log('raid chime played');

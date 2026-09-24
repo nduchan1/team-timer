@@ -52,6 +52,7 @@ export class ClockSync {
   private rejectStreak = 0;
   private afterJump = false;
   private failed = false;
+  private jumps = 0;
   private inflight: Promise<boolean> | null = null;
   private lastTick: { wall: number; perf: number } | null = null;
   private listeners = new Set<(deltaMs: number, prevQuality: ClockQuality) => void>();
@@ -116,6 +117,7 @@ export class ClockSync {
       // Either the PC clock was changed or the PC slept (performance.now() pauses in suspend on
       // macOS/Linux). Drop to 'rough' so the fresh .info/serverTimeOffset of a reconnect is accepted.
       this.afterJump = true;
+      this.jumps++;
       if (this.quality === 'precise') this.quality = 'rough';
       void this.sync(true);
       return;
@@ -125,6 +127,7 @@ export class ClockSync {
   }
 
   private async round(force: boolean): Promise<boolean> {
+    const jumps = this.jumps;
     const rows: { rtt: number; off: number }[] = [];
     try {
       await this.deps.sample(); // warm-up: opens connections, primes caches
@@ -136,6 +139,8 @@ export class ClockSync {
     } catch {
       if (rows.length < 3) return false;
     }
+    // The PC clock jumped or the PC slept mid-round: these samples mix two timelines.
+    if (this.jumps !== jumps) return false;
     this.rounds++;
     const minRtt = Math.min(...rows.map((r) => r.rtt));
     const now = this.deps.perfNow();

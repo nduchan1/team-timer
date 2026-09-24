@@ -82,7 +82,7 @@ class AudioEngine {
     const pending = cur !== null && cur.key === key && ctx.currentTime < cur.when;
     let decision = planSlot(cur, key, when, ctx.currentTime);
     if (decision === 'keep' && pending && cur.kind !== kind) decision = 'schedule'; // chime preset changed
-    if (decision === 'past' && pending && cur.kind === kind) return 'keep'; // it sounds within a few ms anyway
+    if (decision === 'past' && pending && cur.kind === kind && cur.when - when <= 0.05) return 'keep'; // sounds within ms anyway
     if (decision === 'keep') return decision;
     this.cancel(slot);
     if (decision === 'past') return decision;
@@ -122,9 +122,11 @@ class AudioEngine {
     cur.node.disconnect();
   }
 
-  playNow(kind: ChimeKind): boolean {
+  /** Plays right away; with a key, that raid counts as sounded (never scheduled again). */
+  playNow(kind: ChimeKind, key?: number): boolean {
     const ctx = this.ctx;
     if (!ctx || !this.running || !this.master) return false;
+    if (key !== undefined) this.covered.set(key, ctx.currentTime);
     const node = ctx.createBufferSource();
     node.buffer = this.buffer(kind);
     node.connect(this.master);

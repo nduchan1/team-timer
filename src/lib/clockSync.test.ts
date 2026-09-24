@@ -198,6 +198,31 @@ describe('ClockSync', () => {
     expect(c.quality).toBe('precise');
   });
 
+  it('discards a round that a clock jump interrupted', async () => {
+    const trueOffset = 1_750_000_000_000;
+    const w = world({ trueOffset, wallOffset: trueOffset, up: 20, down: 20 });
+    let jumpDuring = false;
+    const c = new ClockSync({
+      ...w.deps,
+      sleep: async (ms) => {
+        await w.deps.sleep(ms);
+        if (jumpDuring) {
+          jumpDuring = false;
+          w.jumpWall(3_600_000); // PC slept mid-round; perf did not advance (macOS/Linux)
+          c.tick();
+        }
+      },
+    });
+    await c.sync();
+    c.tick();
+    w.advance(301_000);
+    jumpDuring = true;
+    c.tick(); // periodic round starts, jump lands inside it
+    await c.sync();
+    expect(c.needsRound).toBe(true);
+    expect(c.quality).toBe('rough');
+  });
+
   it('keeps the old offset when samples fail', async () => {
     const w = world({ trueOffset: 0 });
     const c = new ClockSync({ ...w.deps, sample: () => Promise.reject(new Error('offline')) });

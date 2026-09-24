@@ -9,10 +9,12 @@ import {
   opResume,
   opStart,
   opStop,
+  opTime,
   rebase,
   timerView,
   zerosBetween,
   type TimerCore,
+  type TimerState,
 } from './timerMath.ts';
 
 const I = 210_000;
@@ -224,6 +226,25 @@ describe('ops', () => {
         for (const v of Object.values(out)) expect(v).not.toBeUndefined();
       }
     }
+  });
+});
+
+describe('opTime', () => {
+  const state = (core: TimerCore, updatedAt: number, action: TimerState['action']): TimerState => ({ ...core, v: 5, updatedAt, updatedBy: 'x', action });
+
+  it('uses the click time when the state is older than the click', () => {
+    expect(opTime(state(started(), T0, 'start'), T0 + 5000)).toBe(T0 + 5000);
+  });
+
+  it('never applies an op before a teammate write that landed after the click', () => {
+    // B's "Raided now" at T+200 commits before A's nudge clicked at T
+    const b = state(opRaided(started(), T0 + 100_200), T0 + 100_200, 'raided');
+    const at = opTime(b, T0 + 100_000);
+    expect(at).toBe(T0 + 100_200);
+    const n = opNudge(b, at, -5000);
+    // the nudge moves B's next raid, not B's click
+    expect(timerView(n, at).nextZeroMs).toBe(T0 + 100_200 + I - 5000);
+    expect(timerView(n, at).loops).toBe(timerView(b, at).loops);
   });
 });
 

@@ -77,6 +77,8 @@ export function createFirebaseSync(db: Database, roomId: string, clientId: strin
     },
 
     async write(build, meta, clickNow, serverNow) {
+      // Offline, the SDK buffers the write and replays it at reconnect, possibly minutes later.
+      if (!connected) return { ok: false, error: 'Offline: not saved.' };
       let stale = false;
       try {
         const res = await runTransaction(
