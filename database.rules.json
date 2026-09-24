@@ -1,0 +1,44 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$room": {
+        "timer": {
+          ".read": "$room.matches(/^[A-Za-z0-9_-]{22}$/)",
+          ".write": "$room.matches(/^[A-Za-z0-9_-]{22}$/) && newData.exists() && (!data.exists() || now - data.child('updatedAt').val() > 100)",
+          ".validate": "newData.hasChildren(['v', 'running', 'intervalMs', 'anchorMs', 'loopBase', 'updatedAt', 'updatedBy', 'action']) && newData.child('updatedAt').val() == now && ((!data.exists() && newData.child('v').val() == 1) || (data.exists() && newData.child('v').val() == data.child('v').val() + 1))",
+          "v": { ".validate": "newData.isNumber()" },
+          "running": { ".validate": "newData.isBoolean()" },
+          "intervalMs": { ".validate": "newData.isNumber() && newData.val() >= 10000 && newData.val() <= 86400000" },
+          "anchorMs": { ".validate": "newData.isNumber() && newData.val() > now - 2592000000 && newData.val() < now + 90000000" },
+          "loopBase": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 1000000" },
+          "pausedRemainingMs": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 86400000" },
+          "startedAtMs": { ".validate": "newData.isNumber() && newData.val() > now - 31536000000 && newData.val() < now + 90000000" },
+          "prevZeroMs": { ".validate": "newData.isNumber() && newData.val() > now - 2592000000 && newData.val() < now + 60000" },
+          "updatedAt": { ".validate": "newData.isNumber()" },
+          "updatedBy": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 24" },
+          "action": { ".validate": "newData.isString() && newData.val().matches(/^(create|start|stop|resume|raided|nudge|interval)$/)" },
+          "$other": { ".validate": false }
+        },
+        "presence": {
+          ".read": "$room.matches(/^[A-Za-z0-9_-]{22}$/)",
+          "$cid": {
+            ".write": "$room.matches(/^[A-Za-z0-9_-]{22}$/) && $cid.matches(/^[A-Za-z0-9_-]{22}$/)",
+            ".validate": "newData.hasChildren(['name', 'onDuty', 'since']) && newData.child('since').val() == now",
+            "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 24" },
+            "onDuty": { ".validate": "newData.isBoolean()" },
+            "since": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        }
+      }
+    },
+    "clock": {
+      "$cid": {
+        ".read": "$cid.matches(/^[A-Za-z0-9_-]{22}$/)",
+        ".write": "$cid.matches(/^[A-Za-z0-9_-]{22}$/) && (!newData.exists() || newData.val() == now)"
+      }
+    }
+  }
+}
