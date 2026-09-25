@@ -3,6 +3,8 @@
 **A shared looping raid timer for Travian teams.** One secret link shows the whole team the same countdown and
 loop count. A chime plays at every raid moment, and it keeps playing while you are tabbed into the game.
 
+**Live:** https://team-timer-ten.vercel.app
+
 Built for Hun rainbow raiding, where someone has to click "start farm lists" every few minutes (for example every 3:30),
 and duals need to hand that job over without doing "next raid at…" math on Discord.
 
@@ -60,7 +62,7 @@ npm run lint
 ## Deploy (Vercel)
 
 ```bash
-vercel link                                        # once, project name e.g. team-timer
+vercel link                                        # once (project: team-timer)
 vercel env add VITE_FIREBASE_API_KEY production    # repeat for the 4 variables
 vercel --prod
 ```
