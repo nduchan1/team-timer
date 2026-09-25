@@ -1,6 +1,7 @@
 // Everything the app needs from the sync backend. Firebase RTDB implements it today; a Cloudflare
 // Durable Object (or anything else with push + a server clock) can replace it by implementing this.
 
+import type { ChatMessage } from '../lib/chat.ts';
 import type { ClockSample } from '../lib/clockSync.ts';
 import type { TimerAction, TimerCore, TimerState } from '../lib/timerMath.ts';
 
@@ -36,6 +37,10 @@ export interface RoomSync {
   subscribePresence(cb: (list: PresenceEntry[]) => void): () => void;
   /** Announces (or, with null, withdraws) this tab in the room's presence list. */
   setPresence(p: { name: string; onDuty: boolean } | null): void;
+  /** The room's latest chat messages (oldest first), on load and on every new message. */
+  subscribeChat(cb: (msgs: ChatMessage[]) => void, onError: (message: string) => void): () => void;
+  /** Appends a message; the server stamps its time. */
+  sendChat(msg: { uid: string; name: string; text: string }): Promise<WriteResult>;
   /** Called on every tick: reconnect watchdog. */
   kick(): void;
   dispose(): void;

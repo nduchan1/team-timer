@@ -14,7 +14,7 @@ export default function PresenceList({ snap, ctrl }: { snap: Snapshot; ctrl: Tim
   };
 
   return (
-    <section className="card">
+    <section className="card team">
       <h2>Team</h2>
       <p className="duty">
         {onDuty.length > 0 ? (

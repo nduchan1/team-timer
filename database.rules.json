@@ -21,6 +21,26 @@
           "action": { ".validate": "newData.isString() && newData.val().matches(/^(create|start|stop|resume|raided|nudge|interval)$/)" },
           "$other": { ".validate": false }
         },
+        "chat": {
+          ".read": "$room.matches(/^[A-Za-z0-9_-]{22}$/)",
+          ".indexOn": ["at"],
+          "$msg": {
+            ".write": "$room.matches(/^[A-Za-z0-9_-]{22}$/) && $msg.matches(/^[A-Za-z0-9_-]{20}$/) && !data.exists() && newData.exists()",
+            ".validate": "newData.hasChildren(['uid', 'name', 'text', 'at']) && newData.child('at').val() == now && newData.parent().parent().child('chatLast/id').val() == $msg && newData.parent().parent().child('chatLast/at').val() == now && (!data.parent().parent().child('chatLast/at').exists() || now - data.parent().parent().child('chatLast/at').val() > 200)",
+            "uid": { ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{22}$/)" },
+            "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 24" },
+            "text": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 300" },
+            "at": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        },
+        "chatLast": {
+          ".write": "$room.matches(/^[A-Za-z0-9_-]{22}$/) && newData.exists()",
+          ".validate": "newData.hasChildren(['at', 'id']) && newData.child('at').val() == now && newData.child('id').isString() && newData.parent().child('chat').child(newData.child('id').val()).exists() && !data.parent().child('chat').child(newData.child('id').val()).exists()",
+          "at": { ".validate": "newData.isNumber()" },
+          "id": { ".validate": "newData.isString()" },
+          "$other": { ".validate": false }
+        },
         "presence": {
           ".read": "$room.matches(/^[A-Za-z0-9_-]{22}$/)",
           "$cid": {

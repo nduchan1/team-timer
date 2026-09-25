@@ -17,6 +17,10 @@ and duals need to hand that job over without doing "next raid at…" math on Dis
 - **Server clock.** Every player's countdown is computed from the server's time, so a PC clock that is off does not matter.
 - **Who's on duty.** Shows who has the timer open and who is doing the raid clicks. An optional per-player setting,
   "chime only while I'm on duty", keeps the chime from ringing for everyone.
+- **Team chat** in every room:
+  - The latest 50 messages, grouped by sender.
+  - An unread count in the tab title (and in the pop-out) while you're tabbed into the game.
+  - One-click hand-off buttons: "Taking over" and "Going AFK" post a message and set your on-duty status to match.
 - **Warning chime** a few seconds before each raid (optional, per player).
 - **Pop-out**: a small always-on-top picture-in-picture timer (Chrome/Edge).
 
@@ -61,6 +65,10 @@ vercel env add VITE_FIREBASE_API_KEY production    # repeat for the 4 variables
 vercel --prod
 ```
 
+**Rules first:** whenever `database.rules.json` changes, publish it before (or together with) the app: paste it into the
+Firebase console → Realtime Database → Rules, or run `npx firebase-tools deploy --only database`. `firebase.json` is set up for that.
+An app deployed on top of old rules gets its new writes refused.
+
 Routing uses the URL hash (`/#<room id>`), so no rewrites are needed. The room ID never reaches the server.
 
 ## Architecture
@@ -74,7 +82,8 @@ src/engine/ticker.ts      Web Worker tick source
 src/engine/lifecycle.ts   Web Lock, freeze/resume, discard detection, notification fallback
 src/engine/pip.ts         Document Picture-in-Picture pop-out
 src/audio/                AudioContext engine + synthesized chimes
-database.rules.json       RTDB security rules: the room link is the key; the timer can't be deleted; every field is validated
+database.rules.json       RTDB security rules: the room link is the key; the timer can't be deleted; every field is validated;
+                          chat is append-only (300 chars, max 5 messages/s per room)
 ```
 
 **Limits:** the free Spark plan allows 100 simultaneous connections, meaning 100 open tabs across all teams. All sync code sits behind

@@ -1,21 +1,30 @@
 // Firebase Realtime Database implementation of RoomSync.
 //   rooms/{room}/timer            the shared TimerState (see database.rules.json)
 //   rooms/{room}/presence/{cid}   who has the room open; removed by onDisconnect
+//   rooms/{room}/chat/{pushId}    append-only chat messages, ordered by their server time 'at';
+//                                 rooms/{room}/chatLast {at, id} ties each write to one message (5/s per room)
 //   clock/{cid}                   scratch cell for clock samples; never listened to, so get() reads the server
 
 import {
+  child,
   get,
   goOffline,
   goOnline,
+  limitToLast,
   onDisconnect,
   onValue,
+  orderByChild,
+  push,
+  query,
   ref,
   remove,
   runTransaction,
   serverTimestamp,
   set,
+  update,
   type Database,
 } from 'firebase/database';
+import { CHAT_LIMIT, type ChatMessage } from '../lib/chat.ts';
 import type { TimerState } from '../lib/timerMath.ts';
 import { clean, STALE_WRITE_MS, withTimeout, type PresenceEntry, type RoomSync } from './SyncAdapter.ts';
 
@@ -35,6 +44,8 @@ export function createFirebaseSync(db: Database, roomId: string, clientId: strin
   const presenceListRef = ref(db, `rooms/${roomId}/presence`);
   const presenceRef = ref(db, `rooms/${roomId}/presence/${clientId}`);
   const clockRef = ref(db, `clock/${clientId}`);
+  const roomRef = ref(db, `rooms/${roomId}`);
+  const chatRef = ref(db, `rooms/${roomId}/chat`);
 
   let connected = false;
   let disconnectedSince = performance.now();
@@ -136,6 +147,47 @@ export function createFirebaseSync(db: Database, roomId: string, clientId: strin
           .map(([cid, p]) => ({ cid, name: p.name as string, onDuty: p.onDuty === true }));
         cb(list);
       });
+    },
+
+    subscribeChat(cb, onError) {
+      // Ordered by the server-stamped time, not by the client-chosen key, so neither a forged key
+      // nor a message replayed after a reconnect can take over the window.
+      return onValue(query(chatRef, orderByChild('at'), limitToLast(CHAT_LIMIT)), (snap) => {
+        const list: ChatMessage[] = [];
+        snap.forEach((c) => {
+          const m = c.val() as Partial<ChatMessage> | null;
+          if (m && typeof m.text === 'string' && typeof m.name === 'string' && typeof m.at === 'number' && typeof m.uid === 'string') {
+            list.push({ id: c.key!, uid: m.uid, name: m.name, text: m.text, at: m.at });
+          }
+        });
+        cb(list);
+      }, (err) => onError(message(err)));
+    },
+
+    async sendChat(m) {
+      // Offline, the SDK would queue the message and replay it later, where the room throttle
+      // could reject it; better to say so now.
+      if (!connected) return { ok: false, error: 'Offline: message not sent.' };
+      const id = push(chatRef).key!;
+      // Message and throttle cell in one atomic multi-path write (the rules require both).
+      const payload = () => ({ [`chat/${id}`]: { ...m, at: serverTimestamp() }, chatLast: { at: serverTimestamp(), id } });
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await update(roomRef, payload());
+          return { ok: true };
+        } catch (e) {
+          const s = e instanceof Error ? e.message : String(e);
+          if (!/permission_denied/i.test(s)) return { ok: false, error: `Message not sent: ${s}` };
+          // A write that the server committed but whose ack was lost is re-sent after a reconnect and
+          // then refused as an edit: the message is there, so it was sent.
+          const existing = await get(child(chatRef, id)).catch(() => null);
+          if (existing?.exists() && existing.child('uid').val() === m.uid) return { ok: true };
+          // Otherwise most likely someone else's message landed in the same 200 ms: try once more.
+          if (attempt > 0 || !connected) return { ok: false, error: 'Message not sent: the server refused it. Try again in a moment.' };
+          await new Promise((r) => setTimeout(r, 250 + Math.random() * 250));
+          if (!connected) return { ok: false, error: 'Offline: message not sent.' };
+        }
+      }
     },
 
     setPresence(p) {

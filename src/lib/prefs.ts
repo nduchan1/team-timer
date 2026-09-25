@@ -1,3 +1,5 @@
+import { randomId } from './roomId.ts';
+
 // Per-player preferences in localStorage. Storage can be missing or throw (private windows, blocked
 // site data), so every access is wrapped and the app works with defaults.
 
@@ -23,6 +25,7 @@ export interface RecentRoom {
 
 const PREFS_KEY = 'tt.prefs';
 const RECENT_KEY = 'tt.recent';
+const UID_KEY = 'tt.uid';
 
 export const DEFAULT_PREFS: Prefs = {
   name: '',
@@ -77,6 +80,17 @@ export function rememberRoom(id: string): void {
   const list = loadRecent().filter((r) => r.id !== id);
   list.unshift({ id, at: Date.now() });
   write(RECENT_KEY, list.slice(0, 8));
+}
+
+let uid: string | null = null;
+
+/** Stable id of this browser, used to recognise your own chat messages after a reload. */
+export function getUid(): string {
+  if (uid) return uid;
+  const stored = read<string>(UID_KEY);
+  uid = typeof stored === 'string' && /^[A-Za-z0-9_-]{22}$/.test(stored) ? stored : randomId();
+  if (uid !== stored) write(UID_KEY, uid);
+  return uid;
 }
 
 export function forgetRoom(id: string): void {

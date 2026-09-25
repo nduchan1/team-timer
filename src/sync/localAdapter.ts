@@ -1,11 +1,14 @@
 // Local mode, used when no Firebase config is present: the timer lives in localStorage and syncs between
 // tabs of this browser through a BroadcastChannel. The PC clock stands in for the server clock.
 
+import { CHAT_LIMIT, type ChatMessage } from '../lib/chat.ts';
 import type { TimerState } from '../lib/timerMath.ts';
 import { clean, type PresenceEntry, type RoomSync } from './SyncAdapter.ts';
 
 export function createLocalSync(roomId: string, clientId: string): RoomSync {
   const key = `tt.local.${roomId}`;
+  const chatKey = `tt.localchat.${roomId}`;
+  const chatListeners = new Set<(msgs: ChatMessage[]) => void>();
   const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(`tt-${roomId}`);
   const timerListeners = new Set<(t: TimerState | null) => void>();
   const presenceListeners = new Set<(list: PresenceEntry[]) => void>();
@@ -23,12 +26,25 @@ export function createLocalSync(roomId: string, clientId: string): RoomSync {
     const t = read();
     for (const cb of timerListeners) cb(t);
   };
+  const readChat = (): ChatMessage[] => {
+    try {
+      const list = JSON.parse(localStorage.getItem(chatKey) ?? '[]') as ChatMessage[];
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  };
+  const emitChat = () => {
+    const list = readChat().slice(-CHAT_LIMIT);
+    for (const cb of chatListeners) cb(list);
+  };
   const emitPresence = () => {
     for (const cb of presenceListeners) cb(me ? [me] : []);
   };
-  const onMessage = () => emitTimer();
+  const onMessage = (e: MessageEvent) => (e.data === 'chat' ? emitChat() : emitTimer());
   const onStorage = (e: StorageEvent) => {
     if (e.key === key) emitTimer();
+    if (e.key === chatKey) emitChat();
   };
   channel?.addEventListener('message', onMessage);
   window.addEventListener('storage', onStorage); // second channel, in case a message is missed
@@ -72,6 +88,25 @@ export function createLocalSync(roomId: string, clientId: string): RoomSync {
       return { t0, t3: t0, serverMs: Date.now() };
     },
 
+    subscribeChat(cb, _onError) {
+      chatListeners.add(cb);
+      queueMicrotask(emitChat);
+      return () => chatListeners.delete(cb);
+    },
+
+    async sendChat(m) {
+      const list = readChat();
+      list.push({ id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, ...m, at: Date.now() });
+      try {
+        localStorage.setItem(chatKey, JSON.stringify(list.slice(-200)));
+      } catch {
+        return { ok: false, error: 'Message not sent: browser storage is unavailable.' };
+      }
+      channel?.postMessage('chat');
+      emitChat();
+      return { ok: true };
+    },
+
     subscribePresence(cb) {
       presenceListeners.add(cb);
       queueMicrotask(emitPresence);
@@ -91,6 +126,7 @@ export function createLocalSync(roomId: string, clientId: string): RoomSync {
       channel?.close();
       timerListeners.clear();
       presenceListeners.clear();
+      chatListeners.clear();
     },
   };
 }

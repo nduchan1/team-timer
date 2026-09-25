@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useRoom } from '../hooks/useRoom.ts';
 import { roomLink } from '../lib/roomId.ts';
 import Banners from './Banners.tsx';
+import Chat from './Chat.tsx';
 import Controls from './Controls.tsx';
 import Countdown from './Countdown.tsx';
 import CreateTimer from './CreateTimer.tsx';
@@ -26,6 +27,8 @@ export default function Room({ roomId }: { roomId: string }) {
       prompt('Copy the team link:', roomLink(roomId));
     }
   };
+
+  const ready = snap.status === 'ready' && snap.exists;
 
   return (
     <main className="room">
@@ -54,22 +57,29 @@ export default function Room({ roomId }: { roomId: string }) {
 
       {snap.status === 'ready' && !snap.exists && <CreateTimer snap={snap} ctrl={ctrl} />}
 
-      {snap.status === 'ready' && snap.exists && (
-        <>
+      {ready ? (
+        // One grid, so the cards can re-flow: a side column (team + chat) on wide screens,
+        // one column in this order on narrow ones.
+        <div className="room-grid">
           <section className={`card timer ${snap.flash ? 'flash' : ''}`}>
             <Countdown snap={snap} />
             <StatusLine snap={snap} />
           </section>
           <Controls snap={snap} ctrl={ctrl} />
-          <div className="columns">
+          <div className="side">
             <PresenceList snap={snap} ctrl={ctrl} />
-            <SoundPanel snap={snap} ctrl={ctrl} />
+            <Chat snap={snap} ctrl={ctrl} />
           </div>
+          <SoundPanel snap={snap} ctrl={ctrl} />
+          <SetupChecklist snap={snap} ctrl={ctrl} />
+          <DebugPanel snap={snap} ctrl={ctrl} />
+        </div>
+      ) : (
+        <>
+          <SetupChecklist snap={snap} ctrl={ctrl} />
+          <DebugPanel snap={snap} ctrl={ctrl} />
         </>
       )}
-
-      <SetupChecklist snap={snap} ctrl={ctrl} />
-      <DebugPanel snap={snap} ctrl={ctrl} />
 
       {!snap.joined && snap.status !== 'error' && <SoundGate snap={snap} ctrl={ctrl} />}
     </main>

@@ -33,7 +33,7 @@ body {
 }
 
 #root {
-  max-width: 980px;
+  max-width: 1180px;
   margin: 0 auto;
   padding: 16px;
 }
@@ -69,6 +69,14 @@ code {
 .muted {
   color: var(--muted);
 }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .small {
   font-size: 0.85rem;
 }
@@ -95,14 +103,57 @@ code {
   flex: 1 1 auto;
   min-width: 0;
 }
-.columns {
+/* Room: one column on narrow screens; timer column + team/chat side column on wide ones. */
+.room-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'timer' 'controls' 'side' 'sound' 'setup' 'debug';
+  align-items: start;
+}
+.room-grid .card {
+  margin: 0;
+}
+.room-grid > .timer { grid-area: timer; }
+.room-grid > .controls { grid-area: controls; }
+.room-grid > .side { grid-area: side; }
+.room-grid > .sound { grid-area: sound; }
+.room-grid > .setup { grid-area: setup; }
+.room-grid > .debug { grid-area: debug; }
+.side {
+  display: grid;
   gap: 12px;
 }
-@media (max-width: 700px) {
-  .columns {
-    grid-template-columns: 1fr;
+@media (min-width: 1000px) {
+  .room-grid {
+    grid-template-columns: minmax(0, 1fr) 360px;
+    grid-template-areas:
+      'timer side'
+      'controls side'
+      'sound side'
+      'setup side'
+      'debug side';
+  }
+  /* Team + chat stay in view while scrolling the long setup list, and always fit the window:
+     the chat takes the space left, a big team list scrolls inside its card. */
+  .side {
+    position: sticky;
+    top: 12px;
+    /* room for the header above it before the page is scrolled */
+    height: max(460px, calc(100vh - 150px));
+    display: flex;
+    flex-direction: column;
+  }
+  .side > .team {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .side > .chat {
+    flex: 1 1 0; /* only the space the team card leaves */
+    height: auto;
+    min-height: 260px;
+    max-height: 640px;
   }
 }
 
@@ -335,6 +386,98 @@ input[type='checkbox'] {
 }
 .duty b {
   color: var(--green);
+}
+
+/* ---- chat ---- */
+.chat {
+  display: flex;
+  flex-direction: column;
+  height: 420px;
+}
+.chat-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+.chat-log {
+  list-style: none;
+  margin: 0;
+  padding: 4px 2px;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.chat-empty {
+  padding: 8px 0;
+}
+.chat-item {
+  max-width: 88%;
+}
+.chat-item.head {
+  margin-top: 10px;
+}
+.chat-item.head:first-child {
+  margin-top: 0;
+}
+.chat-item.mine {
+  margin-left: auto;
+}
+.chat-item.mine .chat-meta {
+  text-align: right;
+}
+.chat-meta {
+  font-size: 0.8rem;
+  margin-bottom: 2px;
+}
+.chat-meta b {
+  color: var(--gold);
+}
+.chat-item.mine .chat-meta b {
+  color: var(--green);
+}
+.chat-bubble {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 2px 0;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.chat-item.mine .chat-bubble {
+  margin-left: auto;
+  background: #2d2a17;
+  border-color: #4a4424;
+}
+.chat-jump {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+.chat-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+.chat-form {
+  display: flex;
+  gap: 8px;
+}
+.chat-count {
+  margin: 4px 0 0;
+  text-align: right;
+}
+.mini-chat {
+  margin-top: 4px;
+  color: var(--gold);
+  font-size: 0.8rem;
 }
 
 /* ---- banners, toast, overlay ---- */

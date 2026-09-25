@@ -62,6 +62,11 @@ function MiniTimer({ snap, ctrl }: { snap: Snapshot; ctrl: TimerController }) {
         </button>
       </div>
       {snap.sound !== 'running' && snap.joined && <div className="mini-warn">Sound is off: open the timer tab</div>}
+      {snap.chatUnread > 0 && (
+        <div className="mini-chat">
+          💬 {snap.chatUnread} new message{snap.chatUnread === 1 ? '' : 's'}
+        </div>
+      )}
     </div>
   );
 }

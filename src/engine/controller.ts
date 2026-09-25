@@ -4,9 +4,10 @@
 // state and the server clock, so a dropped connection never delays a chime.
 
 import { audio, type SoundState } from '../audio/audioEngine.ts';
+import { countUnread, latestAt, layoutMessages, normalizeChatText, type ChatItem, type ChatMessage } from '../lib/chat.ts';
 import { ClockSync, type ClockQuality } from '../lib/clockSync.ts';
 import { formatAgo, formatClock, formatCountdown, formatSpan } from '../lib/format.ts';
-import { loadPrefs, rememberRoom, savePrefs, type Prefs } from '../lib/prefs.ts';
+import { getUid, loadPrefs, rememberRoom, savePrefs, type Prefs } from '../lib/prefs.ts';
 import { randomId } from '../lib/roomId.ts';
 import { applyOp, opCreate, opTime, timerView, zerosBetween, type Phase, type TimerAction, type TimerOp, type TimerState } from '../lib/timerMath.ts';
 import { firebaseConfigured, getDb } from '../sync/firebase.ts';
@@ -38,6 +39,20 @@ export interface Banner {
   action?: 'sound' | 'pip';
   dismissable: boolean;
 }
+
+export interface ChatView {
+  loaded: boolean;
+  items: ChatItem[];
+  error: string | null;
+}
+
+export type Handoff = 'take' | 'afk' | 'back';
+
+const HANDOFF_TEXT: Record<Handoff, string> = {
+  take: '🛡️ Taking over the raids.',
+  afk: '💤 Going AFK. Who takes over the raids?',
+  back: '👋 Back.',
+};
 
 export interface Snapshot {
   roomId: string;
@@ -76,11 +91,18 @@ export interface Snapshot {
   lockHeld: boolean;
   usesWorker: boolean;
   debugVersion: number;
+  /** Chat messages from teammates that arrived while the tab was hidden. */
+  chatUnread: number;
+  canChat: boolean;
+  /** A hand-off message is being sent (the quick buttons wait for it). */
+  handoffBusy: boolean;
 }
 
 export class TimerController {
   readonly roomId: string;
   readonly clientId = randomId();
+  /** Stable per-browser id for chat authorship. */
+  readonly uid = getUid();
 
   private sync: RoomSync;
   private clock: ClockSync;
@@ -110,6 +132,12 @@ export class TimerController {
   private lastEvalNow: number | null = null;
   private debug: string[] = [];
   private debugVersion = 0;
+  private chatMsgs: ChatMessage[] = [];
+  private chatView: ChatView = { loaded: false, items: [], error: null };
+  private handoffBusy = false;
+  private chatListeners = new Set<() => void>();
+  private chatSeenAt: number | null = null;
+  private chatUnread = 0;
   private snapshot: Snapshot;
   private snapshotKey = '';
   private listeners = new Set<() => void>();
@@ -158,6 +186,14 @@ export class TimerController {
         this.clock.setRough(off);
         this.touch();
       }),
+      this.sync.subscribeChat(
+        (msgs) => this.onChat(msgs),
+        (msg) => {
+          this.chatView = { ...this.chatView, error: msg };
+          this.log(`chat subscription error: ${msg}`);
+          for (const cb of this.chatListeners) cb();
+        },
+      ),
       this.sync.subscribePresence((list) => {
         this.presence = list;
         this.scheduleChimes(); // "chime only while I'm on duty" depends on who is on duty
@@ -187,6 +223,7 @@ export class TimerController {
           void this.clock.sync(this.clock.needsRound);
           this.sync.kick();
         }
+        if (e.type === 'visible') this.markChatSeen();
         this.updateTickPeriod();
         this.onTick();
         this.touch();
@@ -227,6 +264,13 @@ export class TimerController {
   getDebug(): string[] {
     return this.debug;
   }
+
+  subscribeChat = (cb: () => void): (() => void) => {
+    this.chatListeners.add(cb);
+    return () => this.chatListeners.delete(cb);
+  };
+
+  getChat = (): ChatView => this.chatView;
 
   // ---- actions --------------------------------------------------------------------------------
 
@@ -283,6 +327,33 @@ export class TimerController {
     this.touch();
   }
 
+  /** Sends a chat message; resolves false (with a toast) if it was not sent. */
+  async sendChat(text: string): Promise<boolean> {
+    const clean = normalizeChatText(text);
+    if (!clean || !this.canChat()) return false;
+    const res = await this.sync.sendChat({ uid: this.uid, name: this.prefs.name, text: clean });
+    if (!res.ok) {
+      this.showToast(res.error ?? 'Message not sent. Try again.');
+      this.log(`chat send failed: ${res.error ?? 'unknown'}`);
+      this.touch();
+    }
+    return res.ok;
+  }
+
+  /** One-click hand-off: tells the team and sets the on-duty flag to match. */
+  async handoff(kind: Handoff): Promise<void> {
+    if (this.handoffBusy) return; // a double-click must not post the hand-off twice
+    this.handoffBusy = true;
+    this.touch();
+    try {
+      const ok = await this.sendChat(HANDOFF_TEXT[kind]);
+      if (ok && kind !== 'back') this.setOnDuty(kind === 'take');
+    } finally {
+      this.handoffBusy = false;
+      this.touch();
+    }
+  }
+
   create(intervalMs: number): Promise<void> {
     return this.write((cur, now) => (cur ? null : opCreate(intervalMs, now)), 'create');
   }
@@ -300,6 +371,7 @@ export class TimerController {
     audio.cancel('zero', this.clientId);
     audio.cancel('warn', this.clientId);
     this.listeners.clear();
+    this.chatListeners.clear();
     if (this.toastTimer) clearTimeout(this.toastTimer);
     document.title = 'Team Timer';
   }
@@ -334,6 +406,27 @@ export class TimerController {
       this.prefs.name.length > 0 &&
       (this.sync.mode === 'local' || (this.connected && this.clock.quality !== 'none'))
     );
+  }
+
+  private canChat(): boolean {
+    return !this.disposed && this.joined && this.prefs.name.length > 0 && (this.sync.mode === 'local' || this.connected);
+  }
+
+  private onChat(msgs: ChatMessage[]): void {
+    this.chatMsgs = msgs;
+    // History that was already there when the room opened is not "unread".
+    if (this.chatSeenAt === null || !document.hidden) this.chatSeenAt = Math.max(this.chatSeenAt ?? -Infinity, latestAt(msgs));
+    this.chatUnread = countUnread(msgs, this.chatSeenAt, this.uid);
+    this.chatView = { loaded: true, items: layoutMessages(msgs, this.uid, this.clock.serverNow()), error: null };
+    for (const cb of this.chatListeners) cb();
+    this.onTickTitle();
+    this.touch();
+  }
+
+  private markChatSeen(): void {
+    this.chatSeenAt = Math.max(this.chatSeenAt ?? -Infinity, latestAt(this.chatMsgs));
+    this.chatUnread = 0;
+    this.onTickTitle();
   }
 
   /** Server time used for everything shown or scheduled: never behind what was already judged. */
@@ -494,6 +587,7 @@ export class TimerController {
       if (!t.running) title = `Stopped · Team Timer`;
       else if (performance.now() < this.flashUntil) title = 'RAID! · Team Timer';
       else title = `${formatCountdown(v.remainingMs)} · L${v.loops} · Team Timer`;
+      if (this.chatUnread > 0) title = `(${this.chatUnread}) ${title}`;
       const soundProblem = t.running && (!this.joined || (this.soundWanted() && !audio.running));
       if (soundProblem) title = `🔇 ${title}`;
     }
@@ -592,6 +686,9 @@ export class TimerController {
       lockHeld: isLockHeld(),
       usesWorker: this.ticker?.usesWorker ?? false,
       debugVersion: this.debugVersion,
+      chatUnread: this.chatUnread,
+      canChat: this.canChat(),
+      handoffBusy: this.handoffBusy,
     };
   }
 
