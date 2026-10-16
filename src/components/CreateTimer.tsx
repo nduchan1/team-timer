@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import type { Snapshot, TimerController } from '../engine/controller.ts';
-import { formatDuration, parseDuration } from '../lib/format.ts';
+import { durationError, formatDuration, parseDuration, suggestDuration } from '../lib/format.ts';
 import { DEFAULT_INTERVAL_MS } from '../lib/timerMath.ts';
+import DurationHint from './DurationHint.tsx';
 
 export default function CreateTimer({ snap, ctrl }: { snap: Snapshot; ctrl: TimerController }) {
   const [text, setText] = useState(formatDuration(DEFAULT_INTERVAL_MS));
@@ -11,7 +12,8 @@ export default function CreateTimer({ snap, ctrl }: { snap: Snapshot; ctrl: Time
     e.preventDefault();
     const ms = parseDuration(text);
     if (ms === null) {
-      setError('Use m:ss, e.g. 3:30 (10 s to 24 h).');
+      // A near miss keeps its one-click fix (DurationHint) instead of turning into a plain error.
+      setError(suggestDuration(text) ? '' : durationError(text));
       return;
     }
     void ctrl.create(ms);
@@ -40,6 +42,15 @@ export default function CreateTimer({ snap, ctrl }: { snap: Snapshot; ctrl: Time
         <button className="btn primary" disabled={!snap.canControl}>
           Create timer
         </button>
+        {!error && (
+          <DurationHint
+            text={text}
+            onUse={(fixed) => {
+              setText(fixed);
+              setError('');
+            }}
+          />
+        )}
       </form>
       {error && <p className="error">{error}</p>}
     </section>

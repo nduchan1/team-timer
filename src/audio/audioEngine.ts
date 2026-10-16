@@ -8,6 +8,9 @@ import { synthChime, type ChimeKind } from './chimeSynth.ts';
 export type SoundState = 'locked' | 'running' | 'suspended' | 'interrupted' | 'closed' | 'error' | 'unsupported';
 export type SlotName = 'zero' | 'warn';
 
+/** Safari's Audio Session API; on iPhones its 'playback' type rings through the silent switch. */
+export const audioSessionSupported = typeof navigator !== 'undefined' && navigator.audioSession !== undefined;
+
 interface LiveSlot extends ScheduledSlot {
   node: AudioBufferSourceNode;
   kind: ChimeKind;
@@ -24,6 +27,7 @@ class AudioEngine {
   private covered = new Map<number, number>();
   private errored = false;
   private gain = 0.64;
+  private playback = false;
   private listeners = new Set<() => void>();
 
   get state(): SoundState {
@@ -53,6 +57,7 @@ class AudioEngine {
    */
   async unlock(): Promise<boolean> {
     if (typeof AudioContext === 'undefined') return false;
+    this.applySession();
     if (!this.ctx || this.ctx.state === 'closed' || this.errored) this.create();
     const ctx = this.ctx!;
     try {
@@ -68,6 +73,25 @@ class AudioEngine {
   setVolume(volume: number, muted: boolean): void {
     this.gain = muted ? 0 : (volume / 100) ** 2;
     if (this.master) this.master.gain.value = this.gain;
+  }
+
+  /**
+   * Opt-in: Safari's 'playback' audio session plays through the iPhone's silent switch, but it can
+   * pause music or voice chat in other apps. Off means Safari's default ('auto').
+   */
+  setPlaybackSession(on: boolean): void {
+    this.playback = on;
+    this.applySession();
+  }
+
+  private applySession(): void {
+    const session = typeof navigator === 'undefined' ? undefined : navigator.audioSession;
+    if (!session) return;
+    try {
+      session.type = this.playback ? 'playback' : 'auto';
+    } catch {
+      // older Safari: keeps its default
+    }
   }
 
   /** Schedules (or keeps) the slot's chime for a zero at performance.now() time targetPerf. */

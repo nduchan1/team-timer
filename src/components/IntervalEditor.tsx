@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import type { Snapshot, TimerController } from '../engine/controller.ts';
-import { formatDuration, parseDuration } from '../lib/format.ts';
+import { durationError, formatDuration, parseDuration, suggestDuration } from '../lib/format.ts';
+import DurationHint from './DurationHint.tsx';
 
 const PRESETS = [180_000, 210_000, 240_000, 300_000];
 
@@ -20,7 +21,8 @@ export default function IntervalEditor({ snap, ctrl }: { snap: Snapshot; ctrl: T
     e.preventDefault();
     const ms = parseDuration(text);
     if (ms === null) {
-      setError('Use m:ss, e.g. 3:30 (10 s to 24 h).');
+      // A near miss keeps its one-click fix (DurationHint) instead of turning into a plain error.
+      setError(suggestDuration(text) ? '' : durationError(text));
       return;
     }
     setError('');
@@ -55,8 +57,18 @@ export default function IntervalEditor({ snap, ctrl }: { snap: Snapshot; ctrl: T
       <button className="btn small" disabled={off || !text}>
         Set
       </button>
+      {error ? (
+        <span className="error small">{error}</span>
+      ) : (
+        <DurationHint
+          text={text}
+          onUse={(fixed) => {
+            setText(fixed);
+            setError('');
+          }}
+        />
+      )}
       {running && <span className="muted small">A new interval starts after the next raid.</span>}
-      {error && <span className="error small">{error}</span>}
     </form>
   );
 }

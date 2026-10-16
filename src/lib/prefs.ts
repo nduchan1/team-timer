@@ -15,6 +15,10 @@ export interface Prefs {
   preWarnSec: number;
   /** Chime only while I'm on duty (or while nobody is). */
   dutyOnly: boolean;
+  /** Keep the screen awake while this device is on duty. */
+  keepAwake: boolean;
+  /** iPhone: ring through the silent switch (Safari's 'playback' audio session; may pause other audio). */
+  ringInSilent: boolean;
   checklist: Record<string, boolean>;
 }
 
@@ -34,6 +38,8 @@ export const DEFAULT_PREFS: Prefs = {
   preset: 'bell',
   preWarnSec: 0,
   dutyOnly: false,
+  keepAwake: true,
+  ringInSilent: false,
   checklist: {},
 };
 
@@ -63,6 +69,8 @@ export function loadPrefs(): Prefs {
     preset: p.preset === 'double' || p.preset === 'soft' ? p.preset : 'bell',
     preWarnSec: [0, 5, 10, 15, 30].includes(p.preWarnSec as number) ? (p.preWarnSec as number) : 0,
     dutyOnly: p.dutyOnly === true,
+    keepAwake: p.keepAwake !== false, // on unless turned off, also for players from before it existed
+    ringInSilent: p.ringInSilent === true,
     checklist: p.checklist && typeof p.checklist === 'object' ? p.checklist : {},
   };
 }
@@ -95,4 +103,32 @@ export function getUid(): string {
 
 export function forgetRoom(id: string): void {
   write(RECENT_KEY, loadRecent().filter((r) => r.id !== id));
+}
+
+// On-duty is per tab. It is kept in sessionStorage (which survives a reload of the same tab) with the
+// time it was last saved, so a quick reload can restore it while a tab restored hours later can't.
+
+export interface DutyState {
+  onDuty: boolean;
+  /** Date.now() when saved. */
+  at: number;
+}
+
+const dutyKey = (roomId: string) => `tt.duty.${roomId}`;
+
+export function saveDutyState(roomId: string, onDuty: boolean): void {
+  try {
+    sessionStorage.setItem(dutyKey(roomId), JSON.stringify({ onDuty, at: Date.now() }));
+  } catch {
+    // storage unavailable: on-duty just resets on reload, as before
+  }
+}
+
+export function loadDutyState(roomId: string): DutyState | null {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(dutyKey(roomId)) ?? 'null') as Partial<DutyState> | null;
+    return v && typeof v.onDuty === 'boolean' && typeof v.at === 'number' ? { onDuty: v.onDuty, at: v.at } : null;
+  } catch {
+    return null;
+  }
 }

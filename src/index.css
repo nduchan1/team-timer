@@ -474,11 +474,6 @@ input[type='checkbox'] {
   margin: 4px 0 0;
   text-align: right;
 }
-.mini-chat {
-  margin-top: 4px;
-  color: var(--gold);
-  font-size: 0.8rem;
-}
 
 /* ---- banners, toast, overlay ---- */
 .banners {
@@ -488,6 +483,7 @@ input[type='checkbox'] {
 }
 .banner {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
@@ -613,8 +609,34 @@ details[open] > summary::before {
   justify-content: center;
   margin-top: 6px;
 }
-.mini-warn {
+.mini-line {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 4px;
   margin-top: 4px;
-  color: var(--red);
   font-size: 0.8rem;
+  white-space: nowrap;
+}
+.mini-line > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mini-line .link {
+  color: var(--gold);
+  text-decoration: underline;
+  font-size: inherit;
+}
+.mini-line.red {
+  color: var(--red);
+}
+.mini-line.amber {
+  color: var(--amber);
+}
+.mini-line.gold {
+  color: var(--gold);
+}
+.mini-line.info,
+.mini-line.muted {
+  color: var(--muted);
 }

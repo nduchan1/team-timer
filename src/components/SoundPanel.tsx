@@ -1,3 +1,4 @@
+import { audioSessionSupported } from '../audio/audioEngine.ts';
 import type { Snapshot, TimerController } from '../engine/controller.ts';
 import type { ChimePreset } from '../lib/prefs.ts';
 
@@ -67,7 +68,19 @@ export default function SoundPanel({ snap, ctrl }: { snap: Snapshot; ctrl: Timer
         <input type="checkbox" checked={p.dutyOnly} onChange={(e) => ctrl.setPrefs({ dutyOnly: e.target.checked })} />
         Chime only while I’m on duty (or nobody is)
       </label>
-      {!snap.soundWanted && snap.joined && <p className="muted small">Your chime is silent right now.</p>}
+      {audioSessionSupported && (
+        <label className="check" title="Uses the iPhone's 'playback' audio mode. It can pause music or voice chat in other apps.">
+          <input type="checkbox" checked={p.ringInSilent} onChange={(e) => ctrl.setPrefs({ ringInSilent: e.target.checked })} />
+          Ring even in silent mode (iPhone; may pause music or voice chat)
+        </label>
+      )}
+      {!snap.soundWanted && snap.joined && (
+        <p className="muted small">
+          {snap.silencedBy.length > 0
+            ? `Your chime is silent: ${snap.silencedBy.join(', ')} ${snap.silencedBy.length === 1 ? 'is' : 'are'} on duty.`
+            : 'Your chime is silent right now.'}
+        </p>
+      )}
       <p className="muted small">Use this volume, not the tab’s mute: a muted tab can’t chime.</p>
     </section>
   );

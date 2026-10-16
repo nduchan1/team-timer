@@ -34,7 +34,8 @@ export interface RoomSync {
   subscribeRoughOffset(cb: (offsetMs: number) => void): () => void;
   /** One round-trip-bracketed server timestamp for ClockSync. */
   sampleClock(): Promise<ClockSample>;
-  subscribePresence(cb: (list: PresenceEntry[]) => void): () => void;
+  /** onError: the server stopped sending the list (e.g. refused by the rules); the listener is gone. */
+  subscribePresence(cb: (list: PresenceEntry[]) => void, onError?: (message: string) => void): () => void;
   /** Announces (or, with null, withdraws) this tab in the room's presence list. */
   setPresence(p: { name: string; onDuty: boolean } | null): void;
   /** The room's latest chat messages (oldest first), on load and on every new message. */

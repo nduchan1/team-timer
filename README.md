@@ -17,14 +17,24 @@ and duals need to hand that job over without doing "next raid at…" math on Dis
   - ±1/±5 s nudges;
   - a new interval, which takes effect after the next raid.
 - **Server clock.** Every player's countdown is computed from the server's time, so a PC clock that is off does not matter.
-- **Who's on duty.** Shows who has the timer open and who is doing the raid clicks. An optional per-player setting,
-  "chime only while I'm on duty", keeps the chime from ringing for everyone.
+- **Who's on duty.** Shows who has the timer open and who is doing the raid clicks.
+  - One row per person: a phone and a PC under the same name count as one.
+  - On-duty survives a quick reload.
+  - While you're on duty, the timer keeps the screen awake. This is per device, and only while its page or pop-out is visible.
+  - An optional per-player setting, "chime only while I'm on duty (or nobody is)", keeps the chime from ringing for
+    everyone. It never mutes you because your own other device is on duty.
 - **Team chat** in every room:
   - The latest 50 messages, grouped by sender.
   - An unread count in the tab title (and in the pop-out) while you're tabbed into the game.
-  - One-click hand-off buttons: "Taking over" and "Going AFK" post a message and set your on-duty status to match.
+  - One-click hand-off buttons, each of which posts a message:
+    - "Taking over" (sets you on duty);
+    - "Ask for cover" (keeps you on duty, with your chime; once someone else goes on duty, a banner offers "I'm off now");
+    - "I'm off now" (takes this device off duty);
+    - "Back".
 - **Warning chime** a few seconds before each raid (optional, per player).
-- **Pop-out**: a small always-on-top picture-in-picture timer (Chrome/Edge).
+- **Pop-out**: a small always-on-top picture-in-picture timer (Chrome/Edge). Its one status line shows the most important
+  thing: sound off, offline, missed chimes, silenced, update ready, new chat, or who's on duty.
+- **Updates**: a timer left open for days notices a new deploy and offers a reload.
 
 ### Why the chime survives a background tab
 

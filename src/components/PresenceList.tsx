@@ -2,7 +2,8 @@ import { useState, type FormEvent } from 'react';
 import type { Snapshot, TimerController } from '../engine/controller.ts';
 
 export default function PresenceList({ snap, ctrl }: { snap: Snapshot; ctrl: TimerController }) {
-  const onDuty = snap.presence.filter((p) => p.onDuty);
+  const onDuty = snap.people.filter((p) => p.onDuty);
+  const others = snap.people.filter((p) => !p.me);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(snap.me.name);
 
@@ -29,16 +30,27 @@ export default function PresenceList({ snap, ctrl }: { snap: Snapshot; ctrl: Tim
         <input type="checkbox" checked={snap.me.onDuty} disabled={!snap.joined} onChange={(e) => ctrl.setOnDuty(e.target.checked)} />
         I’m on raid duty
       </label>
+      {snap.wakeSupported && (
+        <label className="check small muted" title="The screen (and on most PCs, sleep) stays on while this page or its pop-out is visible">
+          <input type="checkbox" checked={snap.prefs.keepAwake} onChange={(e) => ctrl.setPrefs({ keepAwake: e.target.checked })} />
+          Keep this screen awake while I’m on duty{snap.wakeHeld ? ' · on ✓' : ''}
+        </label>
+      )}
       <ul className="people">
-        {snap.presence.map((p) => (
-          <li key={p.cid}>
+        {snap.people.map((p) => (
+          <li key={p.key}>
             <i className="dot on" aria-hidden />
             {p.name}
-            {p.cid === snap.me.cid && <span className="muted"> (you)</span>}
+            {p.me && <span className="muted"> (you)</span>}
+            {p.devices > 1 && <span className="muted"> · {p.devices} devices</span>}
             {p.onDuty && <span className="badge">on duty</span>}
           </li>
         ))}
-        {snap.presence.length === 0 && <li className="muted">Nobody else has this timer open.</li>}
+        {snap.presenceError ? (
+          <li className="muted">Team list unavailable right now.</li>
+        ) : (
+          others.length === 0 && <li className="muted">Nobody else has this timer open.</li>
+        )}
       </ul>
       {editing ? (
         <form className="row" onSubmit={rename}>
@@ -59,6 +71,7 @@ export default function PresenceList({ snap, ctrl }: { snap: Snapshot; ctrl: Tim
           >
             change
           </button>
+          {' '}· use the same name on every device
         </p>
       )}
     </section>

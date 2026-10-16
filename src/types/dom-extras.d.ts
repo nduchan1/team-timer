@@ -21,3 +21,12 @@ interface Window {
   /** Chrome/Edge 116+, Firefox 151+. */
   readonly documentPictureInPicture?: DocumentPictureInPicture;
 }
+
+/** Safari 16.4+ (Audio Session API): how the page's audio mixes with other apps and the silent switch. */
+interface AudioSession extends EventTarget {
+  type: 'auto' | 'playback' | 'transient' | 'transient-solo' | 'ambient' | 'play-and-record';
+}
+
+interface Navigator {
+  readonly audioSession?: AudioSession;
+}

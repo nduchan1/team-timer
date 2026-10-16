@@ -5,7 +5,12 @@ import { CHAT_MAX_LEN } from '../lib/chat.ts';
 
 const HANDOFFS: { kind: Handoff; label: string; title: string }[] = [
   { kind: 'take', label: '🛡️ Taking over', title: 'Tell the team you take the raids, and mark yourself on duty' },
-  { kind: 'afk', label: '💤 Going AFK', title: 'Ask who takes over, and take yourself off duty' },
+  {
+    kind: 'cover',
+    label: '🆘 Ask for cover',
+    title: 'Ask who can take over. You stay on duty, with your chime, until you tap “I’m off now”',
+  },
+  { kind: 'off', label: '💤 I’m off now', title: 'Tell the team you stopped raiding, and take yourself off duty' },
   { kind: 'back', label: '👋 Back', title: 'Tell the team you are back' },
 ];
 

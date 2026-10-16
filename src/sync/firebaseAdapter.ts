@@ -139,14 +139,18 @@ export function createFirebaseSync(db: Database, roomId: string, clientId: strin
       return { t0, t3, serverMs };
     },
 
-    subscribePresence(cb) {
-      return onValue(presenceListRef, (snap) => {
-        const val = (snap.val() ?? {}) as Record<string, { name?: unknown; onDuty?: unknown }>;
-        const list: PresenceEntry[] = Object.entries(val)
-          .filter(([, p]) => p && typeof p.name === 'string')
-          .map(([cid, p]) => ({ cid, name: p.name as string, onDuty: p.onDuty === true }));
-        cb(list);
-      });
+    subscribePresence(cb, onError) {
+      return onValue(
+        presenceListRef,
+        (snap) => {
+          const val = (snap.val() ?? {}) as Record<string, { name?: unknown; onDuty?: unknown }>;
+          const list: PresenceEntry[] = Object.entries(val)
+            .filter(([, p]) => p && typeof p.name === 'string')
+            .map(([cid, p]) => ({ cid, name: p.name as string, onDuty: p.onDuty === true }));
+          cb(list);
+        },
+        (err) => onError?.(message(err)),
+      );
     },
 
     subscribeChat(cb, onError) {
