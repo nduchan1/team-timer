@@ -18,6 +18,10 @@ export default function Banners({ snap, ctrl }: { snap: Snapshot; ctrl: TimerCon
         return ctrl.answerDutyRestore(true);
       case 'duty-no':
         return ctrl.answerDutyRestore(false);
+      case 'remind-used':
+        return void ctrl.remindUsedNow(a.arg ?? '');
+      case 'remind-snooze':
+        return void ctrl.remindSnooze(a.arg ?? '');
     }
   };
 

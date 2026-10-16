@@ -14,7 +14,7 @@ interface Tone {
 
 const ATTACK_S = 0.005;
 
-const PRESETS: Record<ChimePreset | 'warn', { tones: Tone[]; peak: number }> = {
+const PRESETS: Record<ChimePreset | 'warn' | 'remind', { tones: Tone[]; peak: number }> = {
   // Bell: a few inharmonic-ish partials with a long ring.
   bell: {
     peak: 0.8,
@@ -48,9 +48,19 @@ const PRESETS: Record<ChimePreset | 'warn', { tones: Tone[]; peak: number }> = {
     peak: 0.35,
     tones: [{ at: 0, freq: 587.3, amp: 1, decay: 0.07, length: 0.25 }],
   },
+  // Reminder (artwork ready): a rising three-note "ding-ding-dong", unlike any raid chime.
+  remind: {
+    peak: 0.6,
+    tones: [
+      { at: 0, freq: 659.3, amp: 1, decay: 0.18, length: 0.45 },
+      { at: 0.22, freq: 784, amp: 1, decay: 0.18, length: 0.45 },
+      { at: 0.44, freq: 1046.5, amp: 1, decay: 0.35, length: 0.9 },
+      { at: 0.44, freq: 2093, amp: 0.15, decay: 0.15, length: 0.5 },
+    ],
+  },
 };
 
-export type ChimeKind = ChimePreset | 'warn';
+export type ChimeKind = ChimePreset | 'warn' | 'remind';
 
 export function synthChime(kind: ChimeKind, sampleRate: number): Float32Array<ArrayBuffer> {
   const { tones, peak } = PRESETS[kind];

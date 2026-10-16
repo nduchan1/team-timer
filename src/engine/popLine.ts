@@ -15,6 +15,8 @@ export interface PopLineInput {
   silencedBy: string[];
   updateReady: boolean;
   chatUnread: number;
+  /** Label of a due reminder not yet dismissed in this tab. */
+  reminderDue: string | null;
   onDutyNames: string[];
 }
 
@@ -35,7 +37,9 @@ export function popLine(s: PopLineInput): PopLine {
   // Chat (a cover request) clears as soon as the timer tab is looked at; the next lines can last for
   // hours and show elsewhere too (🔕 in the tab title, the update banner), so chat goes first.
   if (s.chatUnread > 0) return { tone: 'gold', text: `💬 ${s.chatUnread} new message${s.chatUnread === 1 ? '' : 's'}` };
+  // Silence comes before a due reminder: it has a one-tap fix, and a reminder can stay due for hours.
   if (s.silencedBy.length > 0) return { tone: 'amber', text: `🔕 Silent: ${s.silencedBy.join(', ')} on duty`, action: 'on-duty' };
+  if (s.reminderDue) return { tone: 'gold', text: `⏰ ${s.reminderDue} is ready` };
   if (s.updateReady) return { tone: 'info', text: 'Update ready: reload the timer tab' };
   if (s.onDutyNames.length > 0) return { tone: 'muted', text: `On duty: ${s.onDutyNames.join(', ')}` };
   return { tone: 'muted', text: 'Nobody is on raid duty' };

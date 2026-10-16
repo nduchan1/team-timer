@@ -60,10 +60,12 @@ export function onLife(cb: (e: LifeEvent) => void): () => void {
   return () => listeners.delete(cb);
 }
 
-// Notifications are only a fallback (sound off, or raids missed). Chrome revokes notification permission
-// from sites that send many notifications nobody clicks, so never send one per loop.
+// Notifications are only a fallback (sound off, or raids missed) or rare (a reminder came due). Chrome
+// revokes notification permission from sites that send many notifications nobody clicks, so never send
+// one per loop. Each kind has its own tag and budget, so a reminder never hides a missed-raid alert.
 const NOTIFY_GAP_MS = 180_000;
-let lastNotify = -Infinity;
+export type NotifyKind = 'raid' | 'reminder';
+const lastNotify: Record<NotifyKind, number> = { raid: -Infinity, reminder: -Infinity };
 
 export function notificationPermission(): NotificationPermission | 'unsupported' {
   return typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
@@ -78,13 +80,14 @@ export async function requestNotifications(): Promise<NotificationPermission | '
   }
 }
 
-export function notify(title: string, body: string): boolean {
+/** `id` (e.g. one reminder's due moment) gives it its own tag, so it is a new alert, not a silent update. */
+export function notify(title: string, body: string, kind: NotifyKind = 'raid', id = ''): boolean {
   if (notificationPermission() !== 'granted') return false;
   const now = performance.now();
-  if (now - lastNotify < NOTIFY_GAP_MS) return false;
-  lastNotify = now;
+  if (now - lastNotify[kind] < NOTIFY_GAP_MS) return false;
   try {
-    const n = new Notification(title, { body, tag: 'tt-raid' });
+    const n = new Notification(title, { body, tag: id ? `tt-${kind}-${id}` : `tt-${kind}` });
+    lastNotify[kind] = now; // a notification that could not be shown doesn't use up the budget
     n.onclick = () => {
       window.focus();
       n.close();

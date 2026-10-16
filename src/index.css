@@ -108,7 +108,7 @@ code {
   display: grid;
   gap: 12px;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: 'timer' 'controls' 'side' 'sound' 'setup' 'debug';
+  grid-template-areas: 'timer' 'controls' 'reminders' 'side' 'sound' 'setup' 'debug';
   align-items: start;
 }
 .room-grid .card {
@@ -116,6 +116,7 @@ code {
 }
 .room-grid > .timer { grid-area: timer; }
 .room-grid > .controls { grid-area: controls; }
+.room-grid > .reminders { grid-area: reminders; }
 .room-grid > .side { grid-area: side; }
 .room-grid > .sound { grid-area: sound; }
 .room-grid > .setup { grid-area: setup; }
@@ -130,6 +131,7 @@ code {
     grid-template-areas:
       'timer side'
       'controls side'
+      'reminders side'
       'sound side'
       'setup side'
       'debug side';
@@ -292,6 +294,24 @@ input[type='checkbox'] {
 }
 .sound .row {
   margin-bottom: 8px;
+}
+.reminder + .reminder {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.reminder-head {
+  margin-bottom: 2px;
+}
+.reminder-status b {
+  font-variant-numeric: tabular-nums;
+}
+.reminder.due .ready {
+  color: var(--green);
+}
+.reminder-edit {
+  margin-top: 8px;
+  flex-wrap: wrap;
 }
 
 /* ---- countdown ---- */

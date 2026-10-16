@@ -47,6 +47,7 @@ function MiniTimer({ snap, ctrl }: { snap: Snapshot; ctrl: TimerController }) {
     silencedBy: snap.silencedBy,
     updateReady: snap.updateReady,
     chatUnread: snap.chatUnread,
+    reminderDue: snap.remindDue?.label ?? null,
     onDutyNames: snap.people.filter((p) => p.onDuty).map((p) => p.name),
   });
   return (

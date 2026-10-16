@@ -3,6 +3,7 @@
 //   rooms/{room}/presence/{cid}   who has the room open; removed by onDisconnect
 //   rooms/{room}/chat/{pushId}    append-only chat messages, ordered by their server time 'at';
 //                                 rooms/{room}/chatLast {at, id} ties each write to one message (5/s per room)
+//   rooms/{room}/reminders/{id}   shared reminders (e.g. 'artwork'), changed by patches
 //   clock/{cid}                   scratch cell for clock samples; never listened to, so get() reads the server
 
 import {
@@ -10,10 +11,12 @@ import {
   get,
   goOffline,
   goOnline,
+  limitToFirst,
   limitToLast,
   onDisconnect,
   onValue,
   orderByChild,
+  orderByKey,
   push,
   query,
   ref,
@@ -25,6 +28,7 @@ import {
   type Database,
 } from 'firebase/database';
 import { CHAT_LIMIT, type ChatMessage } from '../lib/chat.ts';
+import { parseReminder, type Reminder } from '../lib/reminders.ts';
 import type { TimerState } from '../lib/timerMath.ts';
 import { clean, STALE_WRITE_MS, withTimeout, type PresenceEntry, type RoomSync } from './SyncAdapter.ts';
 
@@ -46,6 +50,7 @@ export function createFirebaseSync(db: Database, roomId: string, clientId: strin
   const clockRef = ref(db, `clock/${clientId}`);
   const roomRef = ref(db, `rooms/${roomId}`);
   const chatRef = ref(db, `rooms/${roomId}/chat`);
+  const remindersRef = ref(db, `rooms/${roomId}/reminders`);
 
   let connected = false;
   let disconnectedSince = performance.now();
@@ -191,6 +196,53 @@ export function createFirebaseSync(db: Database, roomId: string, clientId: strin
           await new Promise((r) => setTimeout(r, 250 + Math.random() * 250));
           if (!connected) return { ok: false, error: 'Offline: message not sent.' };
         }
+      }
+    },
+
+    subscribeReminders(cb, onError) {
+      // The rules can't count children, so the download is capped instead.
+      return onValue(
+        query(remindersRef, orderByKey(), limitToFirst(20)),
+        (snap) => {
+          const list: Reminder[] = [];
+          snap.forEach((c) => {
+            const r = parseReminder(c.key!, c.val());
+            if (r) list.push(r);
+          });
+          cb(list);
+        },
+        (err) => onError(/permission_denied/i.test(err.message) ? 'the server refused to share them. Reload the page in a minute.' : err.message),
+      );
+    },
+
+    async writeReminder(id, p) {
+      // Offline, the SDK would queue the write and replay it at reconnect: a "Used now" from hours ago.
+      // A write already sent on a socket that turns out dead is replayed too; the rules refuse it by `t`.
+      if (!connected) return { ok: false, error: 'Offline: not saved.' };
+      const data: Record<string, unknown> = { label: p.label, restartMs: p.restartMs, by: p.by, t: p.t, at: serverTimestamp() };
+      if (p.dueAt !== undefined) {
+        data.dueAt = p.dueAt;
+        data.firedAt = null;
+        data.firedBy = null;
+      }
+      if (p.used) {
+        data.usedAt = serverTimestamp();
+        data.usedBy = p.by;
+      }
+      if (p.clearUsed) {
+        data.usedAt = null;
+        data.usedBy = null;
+      }
+      try {
+        // Don't keep the buttons busy on a dead socket. The SDK still re-sends the write after a
+        // reconnect, and the rules accept it until about a minute after the click (`t`).
+        await withTimeout(update(child(remindersRef, id), data), 10_000, 'saving');
+        return { ok: true };
+      } catch (e) {
+        if (e instanceof Error && e.message === 'saving timed out') {
+          return { ok: false, error: 'No answer from the server yet: it may still be saved. Check the reminder before trying again.' };
+        }
+        return { ok: false, error: message(e) };
       }
     },
 

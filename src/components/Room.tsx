@@ -9,6 +9,7 @@ import CreateTimer from './CreateTimer.tsx';
 import DebugPanel from './DebugPanel.tsx';
 import PopOut from './PopOut.tsx';
 import PresenceList from './PresenceList.tsx';
+import Reminders from './Reminders.tsx';
 import SetupChecklist from './SetupChecklist.tsx';
 import SoundGate from './SoundGate.tsx';
 import SoundPanel from './SoundPanel.tsx';
@@ -66,6 +67,7 @@ export default function Room({ roomId }: { roomId: string }) {
             <StatusLine snap={snap} />
           </section>
           <Controls snap={snap} ctrl={ctrl} />
+          <Reminders snap={snap} ctrl={ctrl} />
           <div className="side">
             <PresenceList snap={snap} ctrl={ctrl} />
             <Chat snap={snap} ctrl={ctrl} />

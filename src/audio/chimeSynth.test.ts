@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { synthChime } from './chimeSynth.ts';
 
 describe('synthChime', () => {
-  for (const kind of ['bell', 'double', 'soft', 'warn'] as const) {
+  for (const kind of ['bell', 'double', 'soft', 'warn', 'remind'] as const) {
     it(`${kind}: finite samples, peak within (0, 1], silent ends`, () => {
       const rate = 48_000;
       const s = synthChime(kind, rate);

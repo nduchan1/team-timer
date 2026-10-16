@@ -91,8 +91,8 @@ export function formatHuman(ms: number): string {
 }
 
 /** Local wall-clock time of a server-epoch instant (uses the PC's time zone, never its clock). */
-export function formatClock(epochMs: number): string {
-  return new Date(epochMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+export function formatClock(epochMs: number, withSeconds = true): string {
+  return new Date(epochMs).toLocaleTimeString([], withSeconds ? { hour: '2-digit', minute: '2-digit', second: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
 }
 
 export function formatAgo(ms: number): string {

@@ -31,6 +31,12 @@ and duals need to hand that job over without doing "next raid at…" math on Dis
     - "Ask for cover" (keeps you on duty, with your chime; once someone else goes on duty, a banner offers "I'm off now");
     - "I'm off now" (takes this device off duty);
     - "Back".
+- **Reminders** shared by the room, starting with the hero's **artwork** cooldown (12 h, editable):
+  - "Used now ↻" right after using one; "Ready in…" to copy the time the game shows; "+10 min"; "Clear".
+  - When it's ready, every open timer plays one distinct tone (also with "chime only while I'm on duty"), shows a
+    banner and puts ⏰ in the tab title. A tab opened later shows "ready since" without ringing.
+  - "Copy for Discord" gives a `<t:…:R>` timestamp that Discord shows in each reader's time.
+- **Server time**: the next raid shows in Travian server time (UK time, "ST") next to your local time.
 - **Warning chime** a few seconds before each raid (optional, per player).
 - **Pop-out**: a small always-on-top picture-in-picture timer (Chrome/Edge). Its one status line shows the most important
   thing: sound off, offline, missed chimes, silenced, update ready, new chat, or who's on duty.
@@ -88,14 +94,21 @@ Routing uses the URL hash (`/#<room id>`), so no rewrites are needed. The room I
 ```
 src/lib/timerMath.ts      pure timer math: shared {anchor, interval, loopBase, running} → countdown, loops
 src/lib/clockSync.ts      server-clock offset (Cristian's algorithm over RTDB write-acks), jump detection
+src/lib/presence.ts       duty per person: a player's tabs and devices grouped by name
+src/lib/reminders.ts      shared reminders (artwork): data, parsing, "ring each due moment once per tab"
+src/lib/serverTime.ts     Travian server time (Europe/London)
+src/lib/version.ts        notices a newer deploy (build id vs /version.json)
 src/sync/                 SyncAdapter interface; Firebase RTDB and local-mode implementations
 src/engine/controller.ts  one controller per room, outside React: ticks, chime schedule, banners, snapshot
 src/engine/ticker.ts      Web Worker tick source
 src/engine/lifecycle.ts   Web Lock, freeze/resume, discard detection, notification fallback
 src/engine/pip.ts         Document Picture-in-Picture pop-out
+src/engine/popLine.ts     the pop-out's one status line, chosen by priority
+src/engine/wakeLock.ts    Screen Wake Lock while on duty
 src/audio/                AudioContext engine + synthesized chimes
 database.rules.json       RTDB security rules: the room link is the key; the timer can't be deleted; every field is validated;
-                          chat is append-only (300 chars, max 5 messages/s per room)
+                          chat is append-only (300 chars, max 5 messages/s per room); reminder writes must arrive
+                          within a minute of the click (a replay after a reconnect is refused)
 ```
 
 **Limits:** the free Spark plan allows 100 simultaneous connections, meaning 100 open tabs across all teams. All sync code sits behind

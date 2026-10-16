@@ -2,13 +2,16 @@
 // tabs of this browser through a BroadcastChannel. The PC clock stands in for the server clock.
 
 import { CHAT_LIMIT, type ChatMessage } from '../lib/chat.ts';
+import { parseReminder, type Reminder } from '../lib/reminders.ts';
 import type { TimerState } from '../lib/timerMath.ts';
 import { clean, type PresenceEntry, type RoomSync } from './SyncAdapter.ts';
 
 export function createLocalSync(roomId: string, clientId: string): RoomSync {
   const key = `tt.local.${roomId}`;
   const chatKey = `tt.localchat.${roomId}`;
+  const remKey = `tt.localrem.${roomId}`;
   const chatListeners = new Set<(msgs: ChatMessage[]) => void>();
+  const remListeners = new Set<(list: Reminder[]) => void>();
   const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(`tt-${roomId}`);
   const timerListeners = new Set<(t: TimerState | null) => void>();
   const presenceListeners = new Set<(list: PresenceEntry[]) => void>();
@@ -41,10 +44,25 @@ export function createLocalSync(roomId: string, clientId: string): RoomSync {
   const emitPresence = () => {
     for (const cb of presenceListeners) cb(me ? [me] : []);
   };
-  const onMessage = (e: MessageEvent) => (e.data === 'chat' ? emitChat() : emitTimer());
+  const readRem = (): Record<string, Record<string, unknown>> => {
+    try {
+      const v = JSON.parse(localStorage.getItem(remKey) ?? '{}') as unknown;
+      return v && typeof v === 'object' ? (v as Record<string, Record<string, unknown>>) : {};
+    } catch {
+      return {};
+    }
+  };
+  const emitRem = () => {
+    const list = Object.entries(readRem())
+      .map(([id, v]) => parseReminder(id, v))
+      .filter((r): r is Reminder => r !== null);
+    for (const cb of remListeners) cb(list);
+  };
+  const onMessage = (e: MessageEvent) => (e.data === 'chat' ? emitChat() : e.data === 'reminders' ? emitRem() : emitTimer());
   const onStorage = (e: StorageEvent) => {
     if (e.key === key) emitTimer();
     if (e.key === chatKey) emitChat();
+    if (e.key === remKey) emitRem();
   };
   channel?.addEventListener('message', onMessage);
   window.addEventListener('storage', onStorage); // second channel, in case a message is missed
@@ -113,6 +131,36 @@ export function createLocalSync(roomId: string, clientId: string): RoomSync {
       return () => presenceListeners.delete(cb);
     },
 
+    subscribeReminders(cb, _onError) {
+      remListeners.add(cb);
+      queueMicrotask(emitRem);
+      return () => remListeners.delete(cb);
+    },
+
+    async writeReminder(id, p) {
+      const all = readRem();
+      const next: Record<string, unknown> = { ...all[id], label: p.label, restartMs: p.restartMs, by: p.by, at: Date.now() };
+      if (p.dueAt === null) delete next.dueAt;
+      else if (p.dueAt !== undefined) next.dueAt = p.dueAt;
+      if (p.used) {
+        next.usedAt = Date.now();
+        next.usedBy = p.by;
+      }
+      if (p.clearUsed) {
+        delete next.usedAt;
+        delete next.usedBy;
+      }
+      all[id] = next;
+      try {
+        localStorage.setItem(remKey, JSON.stringify(all));
+      } catch {
+        return { ok: false, error: 'Not saved: browser storage is unavailable.' };
+      }
+      channel?.postMessage('reminders');
+      emitRem();
+      return { ok: true };
+    },
+
     setPresence(p) {
       me = p ? { cid: clientId, name: p.name, onDuty: p.onDuty } : null;
       emitPresence();
@@ -127,6 +175,7 @@ export function createLocalSync(roomId: string, clientId: string): RoomSync {
       timerListeners.clear();
       presenceListeners.clear();
       chatListeners.clear();
+      remListeners.clear();
     },
   };
 }

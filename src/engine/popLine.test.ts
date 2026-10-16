@@ -11,6 +11,7 @@ const calm: PopLineInput = {
   silencedBy: [],
   updateReady: false,
   chatUnread: 0,
+  reminderDue: null,
   onDutyNames: [],
 };
 
@@ -28,6 +29,13 @@ describe('pop-out status line', () => {
     });
     expect(popLine({ ...calm, updateReady: true }).text).toMatch(/Update ready/);
     expect(popLine({ ...calm, updateReady: true, chatUnread: 1 }).text).toBe('💬 1 new message');
+  });
+
+  it('shows a due reminder after chat and silence', () => {
+    expect(popLine({ ...calm, reminderDue: 'Artwork' }).text).toBe('⏰ Artwork is ready');
+    expect(popLine({ ...calm, reminderDue: 'Artwork', silencedBy: ['kvislion'] }).text).toBe('🔕 Silent: kvislion on duty');
+    expect(popLine({ ...calm, reminderDue: 'Artwork', chatUnread: 2 }).text).toBe('💬 2 new messages');
+    expect(popLine({ ...calm, reminderDue: 'Artwork', updateReady: true }).text).toBe('⏰ Artwork is ready');
   });
 
   it('otherwise says who is on duty', () => {

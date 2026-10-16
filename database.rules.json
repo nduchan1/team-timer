@@ -51,6 +51,25 @@
             "since": { ".validate": "newData.isNumber()" },
             "$other": { ".validate": false }
           }
+        },
+        "reminders": {
+          ".read": "$room.matches(/^[A-Za-z0-9_-]{22}$/)",
+          "$id": {
+            ".write": "$room.matches(/^[A-Za-z0-9_-]{22}$/) && $id.matches(/^(artwork|r[0-9]{1,2})$/)",
+            ".validate": "newData.hasChildren(['label', 'by', 'at', 't']) && newData.child('at').val() == now && newData.child('t').val() > now - 60000 && newData.child('t').val() < now + 60000",
+            "label": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 40" },
+            "note": { ".validate": "newData.isString() && newData.val().length <= 120" },
+            "dueAt": { ".validate": "newData.isNumber() && newData.val() > now - 86400000 && newData.val() < now + 604800000" },
+            "restartMs": { ".validate": "newData.isNumber() && newData.val() >= 60000 && newData.val() <= 172800000" },
+            "usedAt": { ".validate": "newData.isNumber() && newData.val() <= now" },
+            "usedBy": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 24" },
+            "firedAt": { ".validate": "newData.isNumber() && newData.val() <= now" },
+            "firedBy": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 24" },
+            "by": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 24" },
+            "at": { ".validate": "newData.isNumber()" },
+            "t": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
         }
       }
     },

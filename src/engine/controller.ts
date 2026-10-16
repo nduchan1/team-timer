@@ -6,16 +6,27 @@
 import { audio, type SoundState } from '../audio/audioEngine.ts';
 import { countUnread, latestAt, layoutMessages, normalizeChatText, type ChatItem, type ChatMessage } from '../lib/chat.ts';
 import { ClockSync, type ClockQuality } from '../lib/clockSync.ts';
-import { formatAgo, formatClock, formatCountdown, formatSpan } from '../lib/format.ts';
+import { formatAgo, formatCountdown, formatSpan } from '../lib/format.ts';
 import { getUid, loadDutyState, loadPrefs, rememberRoom, saveDutyState, savePrefs, type DutyState, type Prefs } from '../lib/prefs.ts';
 import { dutyView, groupPeople, normName, type Person } from '../lib/presence.ts';
+import {
+  ARTWORK,
+  instanceKey,
+  phaseOf,
+  ReminderTracker,
+  SNOOZE_MS,
+  withPresets,
+  type Reminder,
+  type ReminderPhase,
+} from '../lib/reminders.ts';
 import { randomId } from '../lib/roomId.ts';
+import { formatServerTime } from '../lib/serverTime.ts';
 import { versionCheck } from '../lib/version.ts';
 import { applyOp, opCreate, opTime, timerView, zerosBetween, type Phase, type TimerAction, type TimerOp, type TimerState } from '../lib/timerMath.ts';
 import { firebaseConfigured, getDb } from '../sync/firebase.ts';
 import { createFirebaseSync } from '../sync/firebaseAdapter.ts';
 import { createLocalSync } from '../sync/localAdapter.ts';
-import type { PresenceEntry, RoomSync, TimerBuild } from '../sync/SyncAdapter.ts';
+import type { PresenceEntry, ReminderPatch, RoomSync, TimerBuild } from '../sync/SyncAdapter.ts';
 import { audioRanThrough, judgePassedZeros } from './chimePlan.ts';
 import { isLockHeld, notify, onLife, wasDiscarded } from './lifecycle.ts';
 import { pipWindow, subscribePip } from './pip.ts';
@@ -39,11 +50,32 @@ const DUTY_PROMPT_MAX_MS = 12 * 3_600_000;
 /** While on duty the saved flag is re-stamped this often, so a crash or an OS kill counts as recent. */
 const DUTY_REFRESH_MS = 30_000;
 
-export type BannerId = 'discarded' | 'frozen' | 'missed' | 'sound' | 'offline' | 'pip' | 'local' | 'update' | 'cover' | 'duty-restore';
+export type BannerId =
+  | 'discarded'
+  | 'frozen'
+  | 'missed'
+  | 'sound'
+  | 'offline'
+  | 'pip'
+  | 'local'
+  | 'update'
+  | 'cover'
+  | 'duty-restore'
+  | 'reminder';
 
 export interface BannerAction {
-  id: 'sound' | 'pip' | 'reload' | 'off-duty' | 'duty-yes' | 'duty-no';
+  id: 'sound' | 'pip' | 'reload' | 'off-duty' | 'duty-yes' | 'duty-no' | 'remind-used' | 'remind-snooze';
   label: string;
+  /** The reminder id, for the reminder actions. */
+  arg?: string;
+}
+
+/** A reminder as shown now. */
+export interface ReminderView extends Reminder {
+  phase: ReminderPhase;
+  remainingMs: number;
+  /** "4 h 10 min ago" for the last "Used now". */
+  usedAgo: string | null;
 }
 
 export interface Banner {
@@ -83,7 +115,8 @@ export interface Snapshot {
   countdown: string;
   loops: number;
   intervalMs: number;
-  nextRaidAt: string | null;
+  /** Server time of the next raid. */
+  nextRaidMs: number | null;
   warn: boolean;
   flash: boolean;
   canResume: boolean;
@@ -127,6 +160,13 @@ export interface Snapshot {
   canChat: boolean;
   /** A hand-off message is being sent (the quick buttons wait for it). */
   handoffBusy: boolean;
+  /** The room's reminders (with the artwork row once they have loaded; empty before). */
+  reminders: ReminderView[];
+  remindersLoaded: boolean;
+  /** A due reminder this tab has not dismissed yet. */
+  remindDue: { id: string; label: string } | null;
+  canRemind: boolean;
+  remindersError: string | null;
 }
 
 export class TimerController {
@@ -180,6 +220,14 @@ export class TimerController {
   private chatListeners = new Set<() => void>();
   private chatSeenAt: number | null = null;
   private chatUnread = 0;
+  private reminders: Reminder[] = [];
+  /** Until the first snapshot, the made-up artwork row must not be written over real data. */
+  private remindersLoaded = false;
+  private remindersError: string | null = null;
+  private remindBusy = false;
+  private readonly remindTracker = new ReminderTracker();
+  /** Due reminder instances (id@dueAt) whose banner this tab dismissed. */
+  private remindAcked = new Set<string>();
   private snapshot: Snapshot;
   private snapshotKey = '';
   private listeners = new Set<() => void>();
@@ -251,6 +299,20 @@ export class TimerController {
           this.presenceError = true;
           this.log(`presence subscription error: ${msg}`);
           this.scheduleChimes();
+          this.touch();
+        },
+      ),
+      this.sync.subscribeReminders(
+        (list) => {
+          this.reminders = list;
+          this.remindersLoaded = true;
+          this.remindersError = null;
+          this.evaluateReminders();
+          this.touch();
+        },
+        (msg) => {
+          this.remindersError = msg;
+          this.log(`reminders subscription error: ${msg}`);
           this.touch();
         },
       ),
@@ -417,7 +479,40 @@ export class TimerController {
     this.events.delete(id);
     if (id === 'cover') this.coverAsk = null;
     if (id === 'update') this.updateDismissed = true;
+    if (id === 'reminder') {
+      const now = this.effNow();
+      for (const r of this.reminders) if (phaseOf(r, now) === 'due') this.remindAcked.add(instanceKey(r)!);
+      this.onTickTitle();
+    }
     this.touch();
+  }
+
+  // ---- reminders ------------------------------------------------------------------------------
+
+  /** "Used now": the cooldown starts over from this moment. */
+  remindUsedNow(id: string): Promise<boolean> {
+    const r = this.reminderById(id);
+    return this.writeReminder(id, { ...this.basePatch(r), dueAt: this.clock.serverNow() + r.restartMs, used: true });
+  }
+
+  /** The time left as the game shows it. */
+  remindReadyIn(id: string, ms: number): Promise<boolean> {
+    return this.writeReminder(id, { ...this.basePatch(this.reminderById(id)), dueAt: this.clock.serverNow() + ms, clearUsed: true });
+  }
+
+  remindSnooze(id: string): Promise<boolean> {
+    const r = this.reminderById(id);
+    const now = this.clock.serverNow();
+    return this.writeReminder(id, { ...this.basePatch(r), dueAt: Math.max(now, r.dueAt ?? now) + SNOOZE_MS });
+  }
+
+  remindClear(id: string): Promise<boolean> {
+    return this.writeReminder(id, { ...this.basePatch(this.reminderById(id)), dueAt: null });
+  }
+
+  /** The duration a "Used now" restarts with. */
+  remindSetCooldown(id: string, ms: number): Promise<boolean> {
+    return this.writeReminder(id, { ...this.basePatch(this.reminderById(id)), restartMs: ms });
   }
 
   /** Sends a chat message; resolves false (with a toast) if it was not sent. */
@@ -547,6 +642,92 @@ export class TimerController {
     setWakeWanted(this.clientId, !this.disposed && this.joined && this.onDuty && this.prefs.keepAwake);
   }
 
+  private reminderById(id: string): Reminder {
+    return withPresets(this.reminders).find((r) => r.id === id) ?? { ...ARTWORK, id, by: '', at: 0 };
+  }
+
+  private basePatch(r: Reminder): ReminderPatch {
+    return { label: r.label, restartMs: r.restartMs, by: this.prefs.name, t: this.clock.serverNow() };
+  }
+
+  /**
+   * Reminder writes have their own busy flag (they must never block "Raided now"), and wait for the
+   * first snapshot and a readable list (else they'd write over data this tab can't see).
+   */
+  private canRemind(): boolean {
+    return (
+      !this.disposed &&
+      this.joined &&
+      !this.remindBusy &&
+      this.remindersLoaded &&
+      this.remindersError === null &&
+      this.prefs.name.length > 0 &&
+      (this.sync.mode === 'local' || (this.connected && this.clock.quality !== 'none'))
+    );
+  }
+
+  private async writeReminder(id: string, patch: ReminderPatch): Promise<boolean> {
+    if (!this.canRemind()) {
+      // The banner's buttons can get here (the card's are disabled): say why nothing was saved.
+      if (!this.disposed && this.joined && !this.remindBusy) {
+        this.showToast(
+          this.remindersError !== null
+            ? 'Not saved: reminders are unavailable here. Reload the page.'
+            : this.sync.mode === 'firebase' && !this.connected
+              ? 'Offline: not saved. Try again when the connection is back.'
+              : 'Not saved: the timer is still loading. Try again in a moment.',
+        );
+        this.touch();
+      }
+      return false;
+    }
+    this.remindBusy = true;
+    this.touch();
+    const res = await this.sync.writeReminder(id, patch);
+    this.remindBusy = false;
+    if (!res.ok) {
+      this.showToast(res.error ?? 'Not saved. Try again.');
+      this.log(`reminder write failed: ${res.error ?? 'unknown'}`);
+    }
+    this.touch();
+    return res.ok;
+  }
+
+  /**
+   * Rings reminders that just came due, in every joined tab, whatever "chime only while I'm on duty"
+   * says: a reminder is for the whole team. Each due moment rings once per tab (ReminderTracker).
+   */
+  private evaluateReminders(): void {
+    // Before the first clock sync "now" can be off by the PC clock's error: don't judge yet.
+    if (this.sync.mode === 'firebase' && this.clock.quality === 'none') return;
+    for (const r of this.remindTracker.update(this.reminders, this.effNow())) {
+      const played = this.joined && !this.prefs.muted && audio.playNow('remind');
+      this.log(`reminder "${r.label}" is due (${played ? 'tone played' : 'silent'})`);
+      // The pop-out shows it, unless its one line is taken by the 🔕 warning (which outranks it).
+      const seen = pipWindow() !== null && this.silencedBy().length === 0;
+      if (document.hidden && !seen) notify(`⏰ ${r.label} is ready`, 'Open the timer to restart it.', 'reminder', instanceKey(r)!);
+    }
+  }
+
+  /** A reminder that will ring in this tab is counting down. */
+  private reminderWillRing(): boolean {
+    if (!this.joined || this.prefs.muted) return false;
+    const now = this.effNow();
+    return this.reminders.some((r) => phaseOf(r, now) === 'running');
+  }
+
+  /** This tab still has to make sound: raid chimes, or a reminder that will ring here. */
+  private soundNeeded(): boolean {
+    return this.soundWanted() || this.reminderWillRing();
+  }
+
+  /** A due reminder this tab has not dismissed (none while the list can't be read: it may be stale). */
+  private remindDue(): Reminder | null {
+    if (this.remindersError !== null) return null;
+    const now = this.effNow();
+    return this.reminders.find((r) => phaseOf(r, now) === 'due' && !this.remindAcked.has(instanceKey(r)!)) ?? null;
+  }
+
   private canControl(): boolean {
     return (
       !this.disposed &&
@@ -661,6 +842,7 @@ export class TimerController {
     versionCheck.maybeCheck();
     if (this.onDuty && Date.now() - this.dutySavedAt >= DUTY_REFRESH_MS) this.saveDuty();
     this.evaluateZeros(audioRan, gap > GAP_MS ? `the tab was paused for ${formatSpan(gap)}` : null);
+    this.evaluateReminders();
     this.scheduleChimes();
     this.onTickTitle();
     this.touch();
@@ -759,8 +941,10 @@ export class TimerController {
       if (!t.running) title = `Stopped · Team Timer`;
       else if (performance.now() < this.flashUntil) title = 'RAID! · Team Timer';
       else title = `${formatCountdown(v.remainingMs)} · L${v.loops} · Team Timer`;
+      if (this.remindDue()) title = `⏰ ${title}`;
       if (this.chatUnread > 0) title = `(${this.chatUnread}) ${title}`;
-      const soundProblem = t.running && (!this.joined || (this.soundWanted() && !audio.running));
+      const soundProblem =
+        (t.running && !this.joined) || (!audio.running && ((t.running && this.soundWanted()) || this.reminderWillRing()));
       if (soundProblem) title = `🔇 ${title}`;
       else if (t.running && this.silencedBy().length > 0) title = `🔕 ${title}`;
     }
@@ -792,11 +976,16 @@ export class TimerController {
   private banners(): Banner[] {
     const list: Banner[] = [];
     const sound = audio.state;
-    if (this.joined && this.soundWanted() && sound !== 'running') {
+    if (this.joined && this.soundNeeded() && sound !== 'running') {
       list.push({
         id: 'sound',
         tone: 'red',
-        text: sound === 'unsupported' ? 'This browser cannot play sound.' : 'Sound is OFF: the raid chime cannot play.',
+        text:
+          sound === 'unsupported'
+            ? 'This browser cannot play sound.'
+            : this.soundWanted()
+              ? 'Sound is OFF: the raid chime cannot play.'
+              : 'Sound is OFF: reminders cannot ring.',
         actions: sound === 'unsupported' ? undefined : [{ id: 'sound', label: 'Turn sound on' }],
         dismissable: false,
       });
@@ -811,6 +1000,21 @@ export class TimerController {
           { id: 'duty-no', label: 'No' },
         ],
         dismissable: false,
+      });
+    }
+    const due = this.remindDue();
+    if (due) {
+      // Static text: the banner is a live region, so it must not change every minute.
+      const used = due.usedBy && due.usedAt !== undefined ? ` (used by ${due.usedBy} at ${formatServerTime(due.usedAt, false)} ST)` : '';
+      list.push({
+        id: 'reminder',
+        tone: 'amber',
+        text: `⏰ ${due.label} is ready${used}.`,
+        actions: [
+          { id: 'remind-used', label: 'Used now ↻', arg: due.id },
+          { id: 'remind-snooze', label: '+10 min', arg: due.id },
+        ],
+        dismissable: true,
       });
     }
     const taken = this.coverTakenBy();
@@ -852,6 +1056,7 @@ export class TimerController {
       this.clock.quality === 'precise' && Math.abs(pcErr) > 2000
         ? `Your PC clock is ${formatSpan(Math.abs(pcErr))} ${pcErr > 0 ? 'behind' : 'ahead'}. The timer is not affected.`
         : null;
+    const due = this.remindDue();
     return {
       roomId: this.roomId,
       mode: this.sync.mode,
@@ -862,7 +1067,7 @@ export class TimerController {
       countdown: formatCountdown(v?.remainingMs ?? 0),
       loops: v?.loops ?? 0,
       intervalMs: t?.intervalMs ?? 0,
-      nextRaidAt: v?.nextZeroMs != null ? formatClock(v.nextZeroMs) : null,
+      nextRaidMs: v?.nextZeroMs ?? null,
       warn: v !== null && v.phase !== 'stopped' && this.prefs.preWarnSec > 0 && v.remainingMs <= this.prefs.preWarnSec * 1000,
       flash: t?.running === true && performance.now() < this.flashUntil,
       canResume: t !== null && !t.running && t.pausedRemainingMs !== undefined,
@@ -898,6 +1103,19 @@ export class TimerController {
       chatUnread: this.chatUnread,
       canChat: this.canChat(),
       handoffBusy: this.handoffBusy,
+      reminders: this.remindersLoaded
+        ? withPresets(this.reminders).map((r) => ({
+            ...r,
+            phase: phaseOf(r, now),
+            // Whole seconds (as displayed), so the snapshot changes once a second, not every tick.
+            remainingMs: r.dueAt === undefined ? 0 : Math.max(0, Math.ceil((r.dueAt - now) / 1000) * 1000),
+            usedAgo: r.usedAt === undefined ? null : formatAgo(now - r.usedAt),
+          }))
+        : [],
+      remindersLoaded: this.remindersLoaded,
+      remindDue: due ? { id: due.id, label: due.label } : null,
+      canRemind: this.canRemind(),
+      remindersError: this.remindersError,
     };
   }
 
