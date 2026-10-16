@@ -20,12 +20,30 @@ export function parseHash(hash: string): string | null {
   return isRoomId(id) ? id : null;
 }
 
-/** Room ID from a pasted link or a bare code, or null. */
+export type Route =
+  | { page: 'room'; roomId: string }
+  /** The oasis helper; with a room id it can also use the team's uploaded map data. */
+  | { page: 'oases'; roomId: string | null }
+  | { page: 'landing'; bad: boolean };
+
+/** Page for a location hash: "#<room>", "#<room>/oases", "#/oases", or the landing page. */
+export function parseRoute(hash: string): Route {
+  const h = hash.replace(/^#\/?/, '');
+  if (!h) return { page: 'landing', bad: false };
+  if (isRoomId(h)) return { page: 'room', roomId: h };
+  const m = /^(?:([A-Za-z0-9_-]{22})\/)?oases\/?$/.exec(h);
+  if (m) return { page: 'oases', roomId: m[1] ?? null };
+  return { page: 'landing', bad: true };
+}
+
+/** Room ID from a pasted link (also an oasis-helper link) or a bare code, or null. */
 export function parseRoomInput(text: string): string | null {
   const s = text.trim();
   if (isRoomId(s)) return s;
   const i = s.lastIndexOf('#');
-  return i >= 0 ? parseHash(s.slice(i)) : null;
+  if (i < 0) return null;
+  const r = parseRoute(s.slice(i));
+  return r.page === 'landing' ? null : r.roomId;
 }
 
 export function roomLink(id: string): string {

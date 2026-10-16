@@ -17,3 +17,11 @@ export function getDb(): Database {
   if (!db) db = getDatabase(initializeApp(config));
   return db;
 }
+
+let helperDb: Database | null = null;
+
+/** The oasis helper's own connection: switching it on and off never touches the timer's. */
+export function getHelperDb(): Database {
+  if (!helperDb) helperDb = getDatabase(initializeApp(config, 'oasis-helper'));
+  return helperDb;
+}

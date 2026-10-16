@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { durationError, formatCountdown, formatHuman, parseDuration, suggestDuration } from './format.ts';
-import { isRoomId, parseHash, parseRoomInput, randomId } from './roomId.ts';
+import { isRoomId, parseHash, parseRoomInput, parseRoute, randomId } from './roomId.ts';
 
 describe('room ids', () => {
   it('are 22 base64url characters and unique', () => {
@@ -17,6 +17,21 @@ describe('room ids', () => {
     expect(parseRoomInput(`https://team-timer.vercel.app/#${id}`)).toBe(id);
     expect(parseRoomInput(`  ${id} `)).toBe(id);
     expect(parseRoomInput('https://example.com/')).toBeNull();
+    expect(parseRoomInput(`https://team-timer.vercel.app/#${id}/oases`)).toBe(id);
+    expect(parseRoomInput('https://team-timer.vercel.app/#/oases')).toBeNull();
+  });
+
+  it('route the room, the oasis helper and the landing page', () => {
+    const id = randomId();
+    expect(parseRoute(`#${id}`)).toEqual({ page: 'room', roomId: id });
+    expect(parseRoute(`#/${id}`)).toEqual({ page: 'room', roomId: id });
+    expect(parseRoute(`#${id}/oases`)).toEqual({ page: 'oases', roomId: id });
+    expect(parseRoute('#/oases')).toEqual({ page: 'oases', roomId: null });
+    expect(parseRoute('#oases')).toEqual({ page: 'oases', roomId: null });
+    expect(parseRoute('')).toEqual({ page: 'landing', bad: false });
+    expect(parseRoute('#')).toEqual({ page: 'landing', bad: false });
+    expect(parseRoute('#nope')).toEqual({ page: 'landing', bad: true });
+    expect(parseRoute(`#${id}/other`)).toEqual({ page: 'landing', bad: true });
   });
 });
 

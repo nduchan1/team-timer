@@ -612,6 +612,115 @@ details[open] > summary::before {
   border-radius: 6px;
 }
 
+/* ---- oasis helper ---- */
+.oasis-page h3 {
+  font-family: var(--serif);
+  font-size: 1.05rem;
+  margin: 0;
+}
+a.btn {
+  display: inline-block;
+  text-decoration: none;
+}
+.paste {
+  display: block;
+  width: 100%;
+  min-height: 90px;
+  max-height: 220px;
+  margin: 8px 0;
+  font: 0.8rem/1.3 var(--mono);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  resize: vertical;
+}
+.world .row,
+.extra,
+.oasis-filters {
+  margin: 8px 0;
+}
+.upload {
+  cursor: pointer;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 2px 6px 2px 0;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper-2);
+  white-space: nowrap;
+}
+.chip.full {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+.village {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  margin-top: 12px;
+}
+.village-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.lists {
+  margin: 6px 0;
+}
+.oasis-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+.oasis-table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.8rem;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+}
+.oasis-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--paper-2);
+  vertical-align: middle;
+}
+.oasis-table td.num {
+  text-align: right;
+  width: 3.5em;
+}
+.oasis-table tr.done td {
+  opacity: 0.45;
+}
+.oasis-table tr.done a {
+  text-decoration: line-through;
+}
+.grp {
+  white-space: nowrap;
+}
+.grp.easy {
+  color: var(--green);
+}
+.grp.medium {
+  color: var(--gold);
+}
+.grp.hard {
+  color: var(--red);
+}
+@media (max-width: 600px) {
+  .oasis-table th:nth-child(4),
+  .oasis-table td:nth-child(4) {
+    display: none;
+  }
+}
+
 /* ---- picture-in-picture window ---- */
 .pip-body {
   margin: 0;
@@ -659,4 +768,25 @@ details[open] > summary::before {
 .mini-line.info,
 .mini-line.muted {
   color: var(--muted);
+}
+
+/* oasis helper: narrow screens */
+.world select {
+  max-width: 100%;
+  min-width: 0;
+}
+.table-scroll {
+  overflow-x: auto;
+}
+.upload {
+  position: relative;
+}
+.upload:focus-within {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+@media (max-width: 600px) {
+  .grp {
+    white-space: normal;
+  }
 }

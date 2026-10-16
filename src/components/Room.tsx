@@ -41,6 +41,16 @@ export default function Room({ roomId }: { roomId: string }) {
           <button className="btn" onClick={copyLink}>
             {copied ? 'Link copied' : 'Copy team link'}
           </button>
+          {/* A new tab, so this one keeps ticking and chiming. */}
+          <a
+            className="btn"
+            href={`#${roomId}/oases`}
+            target="_blank"
+            rel="noopener"
+            title="Oases near your villages that aren’t in your farm lists yet (opens a new tab)"
+          >
+            Oases
+          </a>
           {snap.exists && <PopOut snap={snap} ctrl={ctrl} />}
         </div>
       </header>

@@ -70,6 +70,27 @@
             "t": { ".validate": "newData.isNumber()" },
             "$other": { ".validate": false }
           }
+        },
+        "oasisIndex": {
+          ".read": "$room.matches(/^[A-Za-z0-9_-]{22}$/)",
+          "$w": {
+            ".write": "$room.matches(/^[A-Za-z0-9_-]{22}$/) && $w.matches(/^[a-z0-9_-]{3,60}$/) && newData.exists() && (!data.exists() || now - data.child('at').val() > 60000)",
+            ".validate": "newData.hasChildren(['world', 'serverUrl', 'scannedAt', 'count', 'by', 'at']) && newData.child('at').val() == now && newData.parent().parent().child('oasisData').child($w).isString()",
+            "world": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
+            "serverUrl": { ".validate": "newData.isString() && newData.val() == 'https://' + $w.replace('_', '.') + '.travian.com'" },
+            "scannedAt": { ".validate": "newData.isNumber() && newData.val() > 1500000000000 && newData.val() <= now + 86400000" },
+            "count": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 60000" },
+            "by": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 24" },
+            "at": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        },
+        "oasisData": {
+          "$w": {
+            ".read": "$room.matches(/^[A-Za-z0-9_-]{22}$/)",
+            ".write": "$room.matches(/^[A-Za-z0-9_-]{22}$/) && $w.matches(/^[a-z0-9_-]{3,60}$/) && newData.exists()",
+            ".validate": "newData.isString() && newData.val().length >= 50 && newData.val().length <= 2000000 && newData.parent().parent().child('oasisIndex').child($w).child('at').val() == now"
+          }
         }
       }
     },

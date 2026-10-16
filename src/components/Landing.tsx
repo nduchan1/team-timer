@@ -55,6 +55,14 @@ export default function Landing({ badLink }: { badLink: boolean }) {
         {error && <p className="error">{error}</p>}
       </section>
 
+      <section className="card">
+        <h2>Oasis helper</h2>
+        <p className="muted">For each of your villages, the free oases nearby that aren’t in your farm lists yet, one click from the game.</p>
+        <a className="btn" href="#/oases">
+          Open the oasis helper
+        </a>
+      </section>
+
       {recent.length > 0 && (
         <section className="card">
           <h2>Recent</h2>

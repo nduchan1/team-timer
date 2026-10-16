@@ -27,3 +27,7 @@ dist-ssr
 .vercel
 .env*
 !.env.example
+
+# Oasis helper: map data is deployed with the site but kept off GitHub; real farm-list pastes never get committed
+public/oasis-data/
+*.paste.txt
