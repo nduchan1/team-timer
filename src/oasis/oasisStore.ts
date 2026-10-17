@@ -6,8 +6,9 @@
 // The helper connects to Firebase only while it reads or writes, so an open helper tab doesn't hold
 // one of the free plan's connections.
 
-import { child, get, goOffline, goOnline, ref, serverTimestamp, update, type Database } from 'firebase/database';
+import { child, get, goOffline, goOnline, ref, remove, serverTimestamp, update, type Database } from 'firebase/database';
 import { firebaseConfigured, getHelperDb } from '../sync/firebase.ts';
+import { markKey, parseFarm, type FarmState, type MergeResult } from './farmState.ts';
 import { compactScan, metaOf, worldKey, type OasisWorld, type WorldMeta } from './scanFormat.ts';
 
 export type Source = 'built-in' | 'team' | 'this tab';
@@ -153,6 +154,43 @@ export async function saveTeam(roomId: string, world: OasisWorld, by: string): P
     throw friendly(e, 'write');
   }
   return { ...meta, source: 'team', by: name };
+}
+
+// ---- the team's saved farm lists and ticks (rooms/{room}/farm/{world}) ------------------------------
+
+const farmPath = (roomId: string, key: string) => `rooms/${roomId}/farm/${key}`;
+
+export async function loadFarm(roomId: string, key: string): Promise<FarmState> {
+  try {
+    const snap = await online((db) => get(ref(db, farmPath(roomId, key))));
+    return parseFarm(snap.val());
+  } catch (e) {
+    throw friendly(e, 'read');
+  }
+}
+
+/** Writes a merge's changes in one update; every record gets the server time. */
+export async function saveFarm(roomId: string, key: string, writes: Extract<MergeResult, { ok: true }>['writes']): Promise<void> {
+  const data: Record<string, unknown> = {};
+  for (const [path, value] of Object.entries(writes)) data[path] = value === null ? null : { ...value, at: serverTimestamp() };
+  if (Object.keys(data).length === 0) return;
+  try {
+    await online((db) => update(ref(db, farmPath(roomId, key)), data));
+  } catch (e) {
+    throw friendly(e, 'write');
+  }
+}
+
+/** The shared "Added" tick: on (for village vx|vy) or off. */
+export async function setMark(roomId: string, key: string, x: number, y: number, village: { x: number; y: number } | null, by: string): Promise<void> {
+  const path = `${farmPath(roomId, key)}/marks/${markKey(x, y)}`;
+  try {
+    await online((db) =>
+      village ? update(ref(db, path), { vx: village.x, vy: village.y, by: (by.trim() || 'Someone').slice(0, 24), at: serverTimestamp() }) : remove(ref(db, path)),
+    );
+  } catch (e) {
+    throw friendly(e, 'write');
+  }
 }
 
 /** One entry per world: the newest scan wins (a team upload replaces an older built-in scan). */

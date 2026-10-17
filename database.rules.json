@@ -85,6 +85,46 @@
             "$other": { ".validate": false }
           }
         },
+        "farm": {
+          "$w": {
+            ".read": "$room.matches(/^[A-Za-z0-9_-]{22}$/) && $w.matches(/^[a-z0-9_-]{3,60}$/)",
+            "villages": {
+              ".write": "$room.matches(/^[A-Za-z0-9_-]{22}$/) && $w.matches(/^[a-z0-9_-]{3,60}$/) && newData.exists()",
+              ".validate": "newData.hasChildren(['list', 'by', 'at']) && newData.child('at').val() == now",
+              "list": { ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 6000" },
+              "by": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 24" },
+              "at": { ".validate": "newData.isNumber()" },
+              "$other": { ".validate": false }
+            },
+            "lists": {
+              "$lk": {
+                ".write": "$room.matches(/^[A-Za-z0-9_-]{22}$/) && $w.matches(/^[a-z0-9_-]{3,60}$/) && $lk.matches(/^-?[0-9]{1,3}_-?[0-9]{1,3}_[0-9a-z]{1,7}$/)",
+                ".validate": "newData.hasChildren(['v', 'vx', 'vy', 'n', 'total', 'by', 'at']) && newData.child('at').val() == now",
+                "v": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
+                "vx": { ".validate": "newData.isNumber() && newData.val() >= -999 && newData.val() <= 999" },
+                "vy": { ".validate": "newData.isNumber() && newData.val() >= -999 && newData.val() <= 999" },
+                "n": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 100" },
+                "total": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 200" },
+                "known": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 200" },
+                "oases": { ".validate": "newData.isString() && newData.val().length <= 2200 && newData.val().matches(/^[-0-9|,]*$/)" },
+                "by": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 24" },
+                "at": { ".validate": "newData.isNumber()" },
+                "$other": { ".validate": false }
+              }
+            },
+            "marks": {
+              "$k": {
+                ".write": "$room.matches(/^[A-Za-z0-9_-]{22}$/) && $w.matches(/^[a-z0-9_-]{3,60}$/) && $k.matches(/^-?[0-9]{1,3}_-?[0-9]{1,3}$/)",
+                ".validate": "newData.hasChildren(['vx', 'vy', 'by', 'at']) && newData.child('at').val() == now",
+                "vx": { ".validate": "newData.isNumber() && newData.val() >= -999 && newData.val() <= 999" },
+                "vy": { ".validate": "newData.isNumber() && newData.val() >= -999 && newData.val() <= 999" },
+                "by": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 24" },
+                "at": { ".validate": "newData.isNumber()" },
+                "$other": { ".validate": false }
+              }
+            }
+          }
+        },
         "oasisData": {
           "$w": {
             ".read": "$room.matches(/^[A-Za-z0-9_-]{22}$/)",

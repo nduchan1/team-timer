@@ -74,6 +74,7 @@ export function parsePaste(text: string): ParsedPaste {
   const lists: PastedList[] = [];
   let village: string | null = null;
   let current: PastedList | null = null;
+  let lastRaided = -1;
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
     if (/^The following targets were deactivated/i.test(t)) {
@@ -84,12 +85,26 @@ export function parsePaste(text: string): ParsedPaste {
     }
     const raided = RAIDED.exec(t);
     if (raided) {
-      // "<village>" (only when the village changes), "<list name>", "a/b being raided".
-      // Lists of the same village follow a "Start (N)" line; anything else is a village header.
+      // "<village>" (only when the village changes), "<list name>", "a/b being raided". The village line
+      // is searched back to the previous list (whose rows are there only if it was expanded).
       const listName = (lines[i - 1] ?? '').trim();
+      let found: string | null = null;
+      let ambiguous = false;
+      for (let k = i - 2; k > lastRaided; k--) {
+        if (/^\t/.test(lines[k])) continue; // a target row of the previous list
+        const s = lines[k].trim();
+        const n = nameCount.get(s) ?? 0;
+        if (n > 0) {
+          if (n === 1) found = s;
+          else ambiguous = true;
+          break;
+        }
+      }
       const header = (lines[i - 2] ?? '').trim();
-      if (nameCount.get(header) === 1) village = header;
-      else if (header && !/^Start \(\d+\)$/.test(header)) village = null; // unknown or ambiguous village
+      if (found) village = found;
+      else if (ambiguous) village = null; // two own villages with this name
+      else if (header && !/^Start \(\d+\)$/.test(header) && !RAIDED.test(header) && !/^\t/.test(lines[i - 2] ?? '')) village = null; // unknown village
+      lastRaided = i;
       current = { village, name: listName, active: Number(raided[1]), total: Number(raided[2]), targets: [] };
       lists.push(current);
       continue;

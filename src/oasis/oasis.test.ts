@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyze, coordText, distance, groupOf, parseCoords, type OasisGroup } from './analyze.ts';
+import { analyze, coordText, distance, groupOf, parseCoords, viewFromPaste, type OasisGroup } from './analyze.ts';
 import { cleanGameText, parsePaste } from './parsePaste.ts';
 import { animalsLabel, compactScan, worldKey, type OasisWorld } from './scanFormat.ts';
 
@@ -112,7 +112,7 @@ describe('analyze', () => {
   });
 
   it('lists free oases in range that no list has, for villages with oasis lists', () => {
-    const a = analyze(WORLD, p, { radius: 20, groups: ALL, allVillages: false });
+    const a = analyze(WORLD, viewFromPaste(p), { radius: 20, groups: ALL, allVillages: false });
     expect(a.villages.map((v) => v.village.name)).toEqual(['V1 Alpha', 'V2 Edge']);
     expect(a.villages[0].missing.map((m) => [m.x, m.y, m.dist, m.group, m.animals])).toEqual([
       [12, 10, 2, 'hard', '31:3,36:1'],
@@ -124,20 +124,20 @@ describe('analyze', () => {
   });
 
   it('includes villages without oasis lists on request', () => {
-    const a = analyze(WORLD, p, { radius: 20, groups: ALL, allVillages: true });
+    const a = analyze(WORLD, viewFromPaste(p), { radius: 20, groups: ALL, allVillages: true });
     expect(a.villages.find((v) => v.village.name === 'V3 Nolists')!.missing.map((m) => [m.x, m.y])).toEqual([[-50, -45]]);
   });
 
   it('offers an oasis only to the nearest village', () => {
     const near = { name: 'Near', x: 12, y: 12 };
-    const a = analyze(WORLD, p, { radius: 20, groups: ALL, allVillages: false, extraVillages: [near] });
+    const a = analyze(WORLD, viewFromPaste(p), { radius: 20, groups: ALL, allVillages: false, extraVillages: [near] });
     expect(a.villages.find((v) => v.village.name === 'V1 Alpha')!.missing.map((m) => [m.x, m.y])).toEqual([[12, 10]]);
     // (12|10) is 2 from both: the tie goes to the first village. (10|31) is 19.1 from Near: in range.
     expect(a.villages.find((v) => v.village.name === 'Near')!.missing.map((m) => [m.x, m.y])).toEqual([[10, 25], [10, 31]]);
   });
 
   it('filters by oasis type group', () => {
-    const a = analyze(WORLD, p, { radius: 20, groups: new Set<OasisGroup>(['easy']), allVillages: false });
+    const a = analyze(WORLD, viewFromPaste(p), { radius: 20, groups: new Set<OasisGroup>(['easy']), allVillages: false });
     expect(a.villages[0].missing.map((m) => m.group)).toEqual(['easy']);
     expect(a.totalMissing).toBe(3);
   });
@@ -148,7 +148,7 @@ describe('analyze', () => {
   });
 
   it('warns about full lists, deactivated targets and oases in two villages', () => {
-    const { warnings } = analyze(WORLD, p, { radius: 20, groups: ALL, allVillages: false });
+    const { warnings } = analyze(WORLD, viewFromPaste(p), { radius: 20, groups: ALL, allVillages: false });
     expect(warnings.fullLists).toEqual([{ village: 'V2 Edge', list: 'V2 - Oases' }]);
     expect(warnings.deactivated).toEqual([{ x: -199, y: 4 }]);
     expect(warnings.inSeveralVillages).toEqual([{ x: 11, y: 10, villages: ['V1 Alpha', 'V2 Edge'] }]);
@@ -165,19 +165,23 @@ describe('analyze', () => {
     ]);
   });
 
-  it('holds back suggestions while a list was not fully copied', () => {
-    // V1 - Farms says 1/3: two of its rows are missing (a collapsed list).
+  it('holds back only the oases near a list that was not fully copied', () => {
+    // V1 - Farms says 1/3: two of its rows are missing (a collapsed list). Its oases are unknown.
     const p2 = parsePaste(PASTE.replace(`${L}1${R}/${L}1${R} being raided`, `${L}1${R}/${L}3${R} being raided`));
-    const a = analyze(WORLD, p2, { radius: 20, groups: ALL, allVillages: false });
-    expect(a.warnings.incompleteLists).toEqual([{ village: 'V1 Alpha', list: 'V1 - Farms', read: 1, total: 3 }]);
-    expect(a.villages.every((v) => v.missing.length === 0)).toBe(true);
-    expect(analyze(WORLD, p, { radius: 20, groups: ALL, allVillages: false }).warnings.incompleteLists).toEqual([]);
+    const a = analyze(WORLD, viewFromPaste(p2), { radius: 20, groups: ALL, allVillages: false });
+    expect(a.warnings.neverExpanded).toEqual([{ village: 'V1 Alpha', list: 'V1 - Farms', total: 3 }]);
+    const v1 = a.villages.find((v) => v.village.name === 'V1 Alpha')!;
+    expect(v1.missing).toEqual([]);
+    expect(v1.heldBack).toBe(2);
+    // Far from V1, V2 still gets its suggestion.
+    expect(a.villages.find((v) => v.village.name === 'V2 Edge')!.missing.map((m) => [m.x, m.y])).toEqual([[-198, 0]]);
+    expect(analyze(WORLD, viewFromPaste(p), { radius: 20, groups: ALL, allVillages: false }).warnings.neverExpanded).toEqual([]);
   });
 
   it('does not give a village’s lists to the previous village when its name is unknown', () => {
     const p2 = parsePaste(PASTE.replace(`V2 Edge\r\n${c(200, 0)}`, ''));
     expect(p2.lists.map((l) => l.village)).toEqual(['V1 Alpha', 'V1 Alpha', null]);
-    const a = analyze(WORLD, p2, { radius: 20, groups: ALL, allVillages: false });
+    const a = analyze(WORLD, viewFromPaste(p2), { radius: 20, groups: ALL, allVillages: false });
     expect(a.warnings.unmatchedLists).toEqual(['V2 - Oases']);
     // Its oases still count as taken.
     expect(a.villages[0].missing.map((m) => [m.x, m.y])).toEqual([[12, 10], [10, 25]]);
@@ -187,7 +191,7 @@ describe('analyze', () => {
     const p2 = parsePaste(PASTE.replace(`V3 Nolists\r\n${c(-50, -50)}`, `V1 Alpha\r\n${c(-50, -50)}`));
     expect(p2.villages.filter((v) => v.name === 'V1 Alpha')).toHaveLength(2);
     expect(p2.lists[0].village).toBeNull(); // which "V1 Alpha"? can't tell
-    const a = analyze(WORLD, p2, { radius: 20, groups: ALL, allVillages: true });
+    const a = analyze(WORLD, viewFromPaste(p2), { radius: 20, groups: ALL, allVillages: true });
     expect(a.villages.filter((v) => v.village.name === 'V1 Alpha').map((v) => v.missing.length)).toEqual([2, 1]);
   });
 
@@ -197,7 +201,7 @@ describe('analyze', () => {
   });
 
   it('shows a pasted village whose coordinates were typed in, under its own name', () => {
-    const a = analyze(WORLD, p, { radius: 20, groups: ALL, allVillages: false, extraVillages: [{ name: '(-50|-50)', x: -50, y: -50 }] });
+    const a = analyze(WORLD, viewFromPaste(p), { radius: 20, groups: ALL, allVillages: false, extraVillages: [{ name: '(-50|-50)', x: -50, y: -50 }] });
     expect(a.villages.map((v) => v.village.name)).toEqual(['V1 Alpha', 'V2 Edge', 'V3 Nolists']);
   });
 

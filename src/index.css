@@ -790,3 +790,14 @@ a.btn {
     white-space: normal;
   }
 }
+
+/* oasis helper: saved farm lists */
+.farm-status {
+  margin: 6px 0;
+}
+.farm-status p {
+  margin: 4px 0 0;
+}
+.added-by {
+  white-space: nowrap;
+}

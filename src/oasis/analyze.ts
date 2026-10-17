@@ -1,6 +1,6 @@
 // Which oases near the team's villages are not in any farm list yet. Pure functions, no I/O.
 
-import { cleanGameText, LIST_MAX, type ParsedPaste, type PastedList, type PastedVillage } from './parsePaste.ts';
+import { cleanGameText, LIST_MAX, type ParsedPaste, type PastedVillage } from './parsePaste.ts';
 import type { Bounds, OasisWorld } from './scanFormat.ts';
 
 /** Travian's oasis-farming guide: how hard the animals usually are, by oasis type. */
@@ -33,7 +33,70 @@ export function distance(a: { x: number; y: number }, b: { x: number; y: number 
 }
 
 const key = (x: number, y: number) => `${x}|${y}`;
-const vkey = (v: PastedVillage) => key(v.x, v.y);
+const vkey = (v: { x: number; y: number }) => key(v.x, v.y);
+
+// ---- input: what is known about the team's farm lists ----------------------------------------------
+
+export interface ListView {
+  /** Village name, or null when the list couldn't be matched to a village. */
+  village: string | null;
+  /** The village's coordinates (null when unmatched). */
+  vx: number | null;
+  vy: number | null;
+  name: string;
+  /** Targets in the list (oases and villages), as the game counts them. */
+  total: number;
+  /** Targets the list had when it was last read in full; undefined = never seen expanded. */
+  known?: number;
+  /** Oases known to be in the list. */
+  oases: { x: number; y: number }[];
+}
+
+/** A shared "Added" tick: an oasis someone added for a village. */
+export interface MarkView {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  by: string;
+  at: number;
+}
+
+export interface FarmView {
+  villages: PastedVillage[];
+  lists: ListView[];
+  marks: MarkView[];
+  /** Targets the game deactivated after an owner change (only from a fresh paste). */
+  deactivated: { x: number; y: number }[];
+}
+
+/** A view of one paste on its own (no saved state): lists not fully copied count as never expanded. */
+export function viewFromPaste(p: ParsedPaste): FarmView {
+  // A name shared by two own villages can't say which one a list belongs to.
+  const count = new Map<string, number>();
+  for (const v of p.villages) count.set(v.name, (count.get(v.name) ?? 0) + 1);
+  const byName = new Map(p.villages.filter((v) => count.get(v.name) === 1).map((v) => [v.name, v]));
+  return {
+    villages: p.villages,
+    marks: [],
+    deactivated: p.deactivated,
+    lists: p.lists.map((l) => {
+      const v = l.village !== null ? byName.get(l.village) : undefined;
+      const oases = l.targets.filter((t) => t.oasis && t.x !== null && t.y !== null).map((t) => ({ x: t.x!, y: t.y! }));
+      return {
+        village: v ? l.village : null,
+        vx: v ? v.x : null,
+        vy: v ? v.y : null,
+        name: l.name,
+        total: l.total,
+        known: l.targets.length >= l.total ? l.total : undefined,
+        oases,
+      };
+    }),
+  };
+}
+
+// ---- output ---------------------------------------------------------------------------------------
 
 export interface MissingOasis {
   x: number;
@@ -45,24 +108,37 @@ export interface MissingOasis {
   animals: string;
 }
 
+export interface TickedOasis extends MissingOasis {
+  by: string;
+  at: number;
+}
+
 export interface VillageResult {
   village: PastedVillage;
-  lists: PastedList[];
+  lists: ListView[];
   /** Oases already in this village's lists. */
   listedOases: number;
   missing: MissingOasis[];
+  /** Oases ticked as added for this village (not yet seen in a list). */
+  ticked: TickedOasis[];
+  /** Free oases near this village held back because one of its lists was never seen expanded. */
+  heldBack: number;
+}
+
+export interface ListRef {
+  village: string | null;
+  list: string;
 }
 
 export interface Warnings {
-  fullLists: { village: string | null; list: string }[];
+  fullLists: ListRef[];
   deactivated: { x: number; y: number }[];
   /** The same oasis in the lists of more than one village. */
   inSeveralVillages: { x: number; y: number; villages: string[] }[];
-  /**
-   * Lists whose targets weren't all in the paste (a collapsed list, for example). Their oases would look
-   * free, so no oases are suggested while there are any.
-   */
-  incompleteLists: { village: string | null; list: string; read: number; total: number }[];
+  /** Lists never seen expanded: their oases are unknown, so free oases near their village are held back. */
+  neverExpanded: (ListRef & { total: number })[];
+  /** Lists that grew since they were last expanded, by more than their village's ticks explain. */
+  grownLists: (ListRef & { total: number; known: number })[];
   /** Lists that couldn't be matched to one of the villages (an unknown or repeated village name). */
   unmatchedLists: string[];
 }
@@ -83,37 +159,54 @@ export interface AnalyzeOptions {
   extraVillages?: PastedVillage[];
 }
 
-export function analyze(world: OasisWorld, paste: ParsedPaste | null, opts: AnalyzeOptions): Analysis {
-  const lists = paste?.lists ?? [];
+export function analyze(world: OasisWorld, view: FarmView | null, opts: AnalyzeOptions): Analysis {
+  const lists = view?.lists ?? [];
+  const marks = view?.marks ?? [];
+  const known = view?.villages ?? [];
+  const nameAt = new Map(known.map((v) => [vkey(v), v.name]));
+
   // Where each listed oasis sits: oasis key -> village names.
   const listedBy = new Map<string, Set<string>>();
-  for (const l of lists) {
-    for (const t of l.targets) {
-      if (!t.oasis || t.x === null || t.y === null) continue;
-      const k = key(t.x, t.y);
-      if (!listedBy.has(k)) listedBy.set(k, new Set());
-      listedBy.get(k)!.add(l.village ?? '?');
-    }
-  }
+  const addListed = (x: number, y: number, village: string) => {
+    const k = key(x, y);
+    if (!listedBy.has(k)) listedBy.set(k, new Set());
+    listedBy.get(k)!.add(village);
+  };
+  for (const l of lists) for (const o of l.oases) addListed(o.x, o.y, l.village ?? '?');
+  const inLists = new Set(listedBy.keys());
+  const deactivated = new Set((view?.deactivated ?? []).map((d) => key(d.x, d.y)));
+  const ticked = new Set(marks.map((m) => key(m.x, m.y)));
 
-  const pasted = paste?.villages ?? [];
-  const withOasisLists = new Set(lists.filter((l) => l.targets.some((t) => t.oasis)).map((l) => l.village));
+  const withOasis = new Set<string>();
+  for (const l of lists) if (l.vx !== null && l.vy !== null && l.oases.length > 0) withOasis.add(key(l.vx, l.vy));
+  for (const m of marks) withOasis.add(key(m.vx, m.vy));
   const extras = opts.extraVillages ?? [];
   const typed = (v: PastedVillage) => extras.some((e) => e.x === v.x && e.y === v.y);
   const shown = [
-    ...pasted.filter((v) => opts.allVillages || withOasisLists.has(v.name) || typed(v)),
-    ...extras.filter((e) => !pasted.some((v) => v.x === e.x && v.y === e.y)),
+    ...known.filter((v) => opts.allVillages || withOasis.has(vkey(v)) || typed(v)),
+    ...extras.filter((e) => !known.some((v) => v.x === e.x && v.y === e.y)),
   ];
-  const incompleteLists = lists
-    .filter((l) => l.targets.length < l.total)
-    .map((l) => ({ village: l.village, list: l.name, read: l.targets.length, total: l.total }));
+
+  // A list never seen expanded may hold any oasis near its village: those stay back.
+  const neverExpanded = lists.filter((l) => l.known === undefined && l.total > 0);
+  const holdAreas = neverExpanded
+    .filter((l) => l.vx !== null && l.vy !== null)
+    .map((l) => {
+      const c = { x: l.vx!, y: l.vy! };
+      const reach = Math.max(opts.radius, ...l.oases.map((o) => distance(c, o, world.bounds)));
+      return { c, reach };
+    });
 
   // Each free oasis in range goes to the nearest shown village (ties: the first one).
   const missingBy = new Map<string, MissingOasis[]>(shown.map((v) => [vkey(v), []]));
+  const heldBy = new Map<string, number>();
+  const info = new Map<string, { bonus: string; group: OasisGroup; animals: string }>();
   let totalMissing = 0;
-  if (shown.length > 0 && incompleteLists.length === 0) {
+  if (shown.length > 0) {
     for (const [x, y, b, occupied, animals] of world.oases) {
-      if (occupied || listedBy.has(key(x, y))) continue;
+      const k = key(x, y);
+      if (ticked.has(k)) info.set(k, { bonus: world.bonuses[b], group: groupOf(world.bonuses[b]), animals });
+      if (occupied || inLists.has(k) || ticked.has(k) || deactivated.has(k)) continue;
       let best: PastedVillage | null = null;
       let bestD = Infinity;
       for (const v of shown) {
@@ -124,6 +217,10 @@ export function analyze(world: OasisWorld, paste: ParsedPaste | null, opts: Anal
         }
       }
       if (!best) continue;
+      if (holdAreas.some((h) => distance(h.c, { x, y }, world.bounds) <= h.reach)) {
+        heldBy.set(vkey(best), (heldBy.get(vkey(best)) ?? 0) + 1);
+        continue;
+      }
       totalMissing++;
       const bonus = world.bonuses[b];
       const group = groupOf(bonus);
@@ -132,15 +229,37 @@ export function analyze(world: OasisWorld, paste: ParsedPaste | null, opts: Anal
     }
   }
 
+  const byDist = (a: MissingOasis, b: MissingOasis) => a.dist - b.dist || a.x - b.x || a.y - b.y;
   const villages: VillageResult[] = shown.map((v) => {
-    const own = lists.filter((l) => l.village === v.name);
+    const own = lists.filter((l) => l.vx === v.x && l.vy === v.y);
+    const tickedHere: TickedOasis[] = marks
+      .filter((m) => m.vx === v.x && m.vy === v.y && !inLists.has(key(m.x, m.y)))
+      .map((m) => {
+        const i = info.get(key(m.x, m.y)) ?? { bonus: 'Unknown', group: 'hard' as const, animals: '' };
+        return { x: m.x, y: m.y, dist: Math.round(distance(v, m, world.bounds) * 10) / 10, ...i, by: m.by, at: m.at };
+      })
+      .sort(byDist);
     return {
       village: v,
       lists: own,
-      listedOases: own.reduce((n, l) => n + l.targets.filter((t) => t.oasis).length, 0),
-      missing: missingBy.get(vkey(v))!.sort((a, b) => a.dist - b.dist || a.x - b.x || a.y - b.y),
+      listedOases: own.reduce((n, l) => n + l.oases.length, 0),
+      missing: missingBy.get(vkey(v))!.sort(byDist),
+      ticked: tickedHere,
+      heldBack: heldBy.get(vkey(v)) ?? 0,
     };
   });
+
+  // Growth since the last expanded copy that the village's open ticks don't explain.
+  const grownLists: Warnings['grownLists'] = [];
+  const villageKeys = new Set(lists.filter((l) => l.vx !== null && l.vy !== null).map((l) => key(l.vx!, l.vy!)));
+  for (const vk of villageKeys) {
+    const own = lists.filter((l) => l.vx !== null && key(l.vx, l.vy!) === vk && l.known !== undefined);
+    const growth = own.reduce((n, l) => n + Math.max(0, l.total - l.known!), 0);
+    const open = marks.filter((m) => key(m.vx, m.vy) === vk && !inLists.has(key(m.x, m.y))).length;
+    if (growth > open) {
+      for (const l of own) if (l.total > l.known!) grownLists.push({ village: l.village ?? nameAt.get(vk) ?? null, list: l.name, total: l.total, known: l.known! });
+    }
+  }
 
   const inSeveralVillages = [...listedBy.entries()]
     .filter(([, vs]) => vs.size > 1)
@@ -153,10 +272,11 @@ export function analyze(world: OasisWorld, paste: ParsedPaste | null, opts: Anal
     villages,
     totalMissing,
     warnings: {
-      fullLists: lists.filter((l) => l.targets.length >= LIST_MAX || l.total >= LIST_MAX).map((l) => ({ village: l.village, list: l.name })),
-      deactivated: paste?.deactivated ?? [],
+      fullLists: lists.filter((l) => l.total >= LIST_MAX).map((l) => ({ village: l.village, list: l.name })),
+      deactivated: view?.deactivated ?? [],
       inSeveralVillages,
-      incompleteLists,
+      neverExpanded: neverExpanded.map((l) => ({ village: l.village, list: l.name, total: l.total })),
+      grownLists,
       unmatchedLists: lists.filter((l) => l.village === null).map((l) => l.name),
     },
   };
