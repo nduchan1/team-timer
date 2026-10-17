@@ -145,8 +145,9 @@ export default function OasisPage({ roomId }: { roomId: string | null }) {
       return next;
     });
 
-  const onUploaded = (w: OasisWorld, shared: boolean) => {
-    if (shared) setEntries((cur) => mergeWorlds(cur ?? [], [{ ...metaOf(w), source: 'team' }]));
+  /** shared: the room's new entry (with who uploaded it) when the world was saved for the team. */
+  const onUploaded = (w: OasisWorld, shared: WorldEntry | null) => {
+    if (shared) setEntries((cur) => mergeWorlds([shared], cur ?? []));
     setUploaded((cur) => [...cur.filter((u) => metaOf(u).key !== metaOf(w).key), w]);
     setSelected(metaOf(w).key);
   };
@@ -279,7 +280,7 @@ function WorldPicker(props: {
   error: string;
   onRetry?: () => void;
   roomId: string | null;
-  onUploaded: (w: OasisWorld, shared: boolean) => void;
+  onUploaded: (w: OasisWorld, shared: WorldEntry | null) => void;
 }) {
   const { entries, options, selected, onSelect, error, onRetry, roomId, onUploaded } = props;
   const [pending, setPending] = useState<OasisWorld | null>(null);
@@ -308,8 +309,8 @@ function WorldPicker(props: {
     setBusy(true);
     setMsg('');
     try {
-      await saveTeam(roomId, pending, loadPrefs().name);
-      onUploaded(pending, true);
+      const saved = await saveTeam(roomId, pending, loadPrefs().name);
+      onUploaded(pending, saved);
       setMsg(`Saved for the team: everyone with the room link now gets ${pending.world}.`);
       setPending(null);
     } catch (err) {
@@ -360,7 +361,7 @@ function WorldPicker(props: {
             <button
               className="btn small"
               onClick={() => {
-                onUploaded(pending, false);
+                onUploaded(pending, null);
                 setPending(null);
               }}
             >
