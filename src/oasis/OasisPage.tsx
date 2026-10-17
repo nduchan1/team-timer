@@ -56,7 +56,7 @@ function reportText(r: MergeReport): string {
   const parts: string[] = [];
   if (r.replaced) parts.push(`${r.replaced} updated`);
   if (r.merged) parts.push(`${r.merged} merged`);
-  if (r.kept + r.recounted) parts.push(`${r.kept + r.recounted} kept from before (collapsed)`);
+  if (r.kept + r.recounted) parts.push(`${r.kept + r.recounted} kept as saved`);
   if (r.unknown) parts.push(`${r.unknown} never expanded`);
   if (r.deleted) parts.push(`${r.deleted} removed`);
   if (r.confirmedTicks) parts.push(`${r.confirmedTicks} ${r.confirmedTicks === 1 ? 'tick' : 'ticks'} confirmed`);
@@ -338,6 +338,7 @@ export default function OasisPage({ roomId }: { roomId: string | null }) {
     try {
       await saveFarm(roomId, worldKey, forgetWrites(farmState, myName()));
       setSaveNote(null);
+      setPaste('');
     } catch (e) {
       setFarmError((e as Error).message);
     }
@@ -877,7 +878,8 @@ function FarmStatus(props: {
   onReplace: () => void;
 }) {
   const { state, error, saving, note, onRefresh, onForget, onReplace } = props;
-  const last = state ? lastSaved(state) : null;
+  // After "Forget" the village list is still there (empty), but nothing is saved.
+  const last = state && state.lists.length > 0 ? lastSaved(state) : null;
   return (
     <div className="farm-status small">
       <div className="row wrap">

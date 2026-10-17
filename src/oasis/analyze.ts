@@ -255,11 +255,12 @@ export function analyze(world: OasisWorld, view: FarmView | null, opts: AnalyzeO
     };
   });
 
-  // Growth since the last expanded copy that the village's open ticks don't explain.
+  // Growth since the last expanded copy that the village's open ticks don't explain. Only lists that held
+  // oases count: a list of villages ("Steppes") growing says nothing about oases.
   const grownLists: Warnings['grownLists'] = [];
   const villageKeys = new Set(lists.filter((l) => l.vx !== null && l.vy !== null).map((l) => key(l.vx!, l.vy!)));
   for (const vk of villageKeys) {
-    const own = lists.filter((l) => l.vx !== null && key(l.vx, l.vy!) === vk && l.known !== undefined);
+    const own = lists.filter((l) => l.vx !== null && key(l.vx, l.vy!) === vk && l.known !== undefined && l.oases.length > 0);
     const growth = own.reduce((n, l) => n + Math.max(0, l.total - l.known!), 0);
     const open = marks.filter((m) => key(m.vx, m.vy) === vk && !inLists.has(key(m.x, m.y))).length;
     if (growth > open) {

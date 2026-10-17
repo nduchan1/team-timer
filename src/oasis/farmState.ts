@@ -160,7 +160,7 @@ export interface MergeReport {
   replaced: number;
   /** Lists read in part, merged with what was saved. */
   merged: number;
-  /** Collapsed lists whose saved oases were kept as they were. */
+  /** Lists kept as saved (collapsed, or expanded and unchanged). */
   kept: number;
   /** Collapsed lists whose count changed (their saved oases were kept). */
   recounted: number;
@@ -295,6 +295,7 @@ export function mergePaste(state: FarmState, p: ParsedPaste, by: string, now: nu
     const changed = !old || !sameRecord(rec, old);
     if (kind === 'replaced') {
       if (changed) report.replaced++;
+      else report.kept++;
     } else report[kind]++;
     if (changed) {
       const { oases, known, ...rest } = rec;

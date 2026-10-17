@@ -93,6 +93,41 @@ describe('parsePaste', () => {
     expect(p.lists[1].targets[0]).toMatchObject({ name: 'Some Village', pop: 1234, dist: 7.3, oasis: false, x: null });
   });
 
+  it('reads collapsed lists, which the game copies as a header with an empty table', () => {
+    // As copied on ts33 (Oct 2026): rows replaced by an empty "Last raid" block.
+    const collapsed = (name: string, a: number, b: number) => [
+      name,
+      `${L}${a}${R}/${L}${b}${R} being raided`,
+      '',
+      `Start (${a})`,
+      '\t\t',
+      'Last raid',
+      `Add target ${b}/100`,
+      '\tNo target selected',
+      '',
+      '',
+      `Start (${a})`,
+    ];
+    const text = [
+      'Farm List',
+      'V1 Alpha',
+      ...collapsed('V1 - Oases', 2, 3),
+      ...collapsed('V1 - Farms', 1, 1),
+      'V2 Edge',
+      ...collapsed('V2 - Oases', 1, 100),
+      'Villages 2/2',
+      'V1 Alpha',
+      c(10, 10),
+      'V2 Edge',
+      c(200, 0),
+    ].join('\r\n');
+    expect(parsePaste(text).lists.map((l) => [l.village, l.name, l.total, l.targets.length])).toEqual([
+      ['V1 Alpha', 'V1 - Oases', 3, 0],
+      ['V1 Alpha', 'V1 - Farms', 1, 0],
+      ['V2 Edge', 'V2 - Oases', 100, 0],
+    ]);
+  });
+
   it('reads the deactivated banner', () => {
     expect(p.deactivated).toEqual([{ x: -199, y: 4 }]);
   });
