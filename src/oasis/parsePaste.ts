@@ -85,25 +85,16 @@ export function parsePaste(text: string): ParsedPaste {
     }
     const raided = RAIDED.exec(t);
     if (raided) {
-      // "<village>" (only when the village changes), "<list name>", "a/b being raided". The village line
-      // is searched back to the previous list (whose rows are there only if it was expanded).
+      // "<village>" (only when the village changes), "<list name>", "a/b being raided". The village line is
+      // the nearest line above the list name, skipping the previous list's rows (there if it was expanded).
       const listName = (lines[i - 1] ?? '').trim();
-      let found: string | null = null;
-      let ambiguous = false;
-      for (let k = i - 2; k > lastRaided; k--) {
-        if (/^\t/.test(lines[k])) continue; // a target row of the previous list
-        const s = lines[k].trim();
-        const n = nameCount.get(s) ?? 0;
-        if (n > 0) {
-          if (n === 1) found = s;
-          else ambiguous = true;
-          break;
-        }
-      }
-      const header = (lines[i - 2] ?? '').trim();
-      if (found) village = found;
-      else if (ambiguous) village = null; // two own villages with this name
-      else if (header && !/^Start \(\d+\)$/.test(header) && !RAIDED.test(header) && !/^\t/.test(lines[i - 2] ?? '')) village = null; // unknown village
+      let k = i - 2;
+      while (k > lastRaided && /^\t/.test(lines[k])) k--;
+      const header = k > lastRaided ? lines[k].trim() : '';
+      const n = nameCount.get(header) ?? 0;
+      if (n === 1) village = header;
+      else if (n > 1) village = null; // two own villages with this name
+      else if (header && !/^Start \(\d+\)$/.test(header) && !RAIDED.test(header) && !/^[\d,.:\s]+$/.test(header)) village = null; // unknown village
       lastRaided = i;
       current = { village, name: listName, active: Number(raided[1]), total: Number(raided[2]), targets: [] };
       lists.push(current);

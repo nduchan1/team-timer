@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { formatAgo } from '../lib/format.ts';
 import { loadPrefs } from '../lib/prefs.ts';
 import { analyze, coordText, GROUP_LABEL, parseCoords, viewFromPaste, type MissingOasis, type OasisGroup, type TickedOasis, type VillageResult } from './analyze.ts';
-import { lastSaved, mergePaste, viewFromFarm, type FarmState, type MergeReport } from './farmState.ts';
+import { forgetWrites, lastSaved, mergePaste, viewFromFarm, type FarmState, type MergeReport } from './farmState.ts';
 import {
   listBuiltIn,
   listTeam,
@@ -11,6 +11,7 @@ import {
   loadTeam,
   mergeWorlds,
   saveFarm,
+  removeList,
   saveTeam,
   setMark,
   teamStorageAvailable,
@@ -61,6 +62,16 @@ function reportText(r: MergeReport): string {
   if (r.confirmedTicks) parts.push(`${r.confirmedTicks} ${r.confirmedTicks === 1 ? 'tick' : 'ticks'} confirmed`);
   const text = parts.length ? `Saved for the team: ${parts.join(', ')}.` : 'Saved for the team: nothing changed.';
   return r.unmatched.length ? `${text} Not saved (no village matched): ${r.unmatched.join(', ')}.` : text;
+}
+
+interface SaveNote {
+  tone: 'ok' | 'error';
+  text: string;
+  /** The paste and world it is about. */
+  paste: string;
+  key: string;
+  /** The paste is from another account or server: offer to replace the saved lists with it. */
+  canReplace?: boolean;
 }
 
 const timeText = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -158,20 +169,23 @@ export default function OasisPage({ roomId }: { roomId: string | null }) {
   // ---- the team's saved farm lists and ticks (room mode) ----
   const shared = roomId !== null && teamStorageAvailable;
   const worldKey = world ? metaOf(world).key : null;
-  const [farm, setFarm] = useState<{ key: string; state: FarmState } | null>(null);
+  // Saved state per world, so a late answer for another world can't take this one's place.
+  const [farms, setFarms] = useState<Record<string, FarmState>>({});
   const [farmError, setFarmError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [saveNote, setSaveNote] = useState<{ tone: 'ok' | 'error'; text: string; paste: string } | null>(null);
+  const [saveNote, setSaveNote] = useState<SaveNote | null>(null);
+  const [handled, setHandled] = useState<{ paste: string; key: string } | null>(null);
   const lastLoad = useRef(0);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveChain = useRef<Promise<void>>(Promise.resolve());
   const myName = () => loadPrefs().name.trim() || 'Someone';
+  const putFarm = (key: string, state: FarmState) => setFarms((cur) => ({ ...cur, [key]: state }));
 
   const reload = async (key = worldKey) => {
     if (!shared || !roomId || !key) return;
     try {
       const state = await loadFarm(roomId, key);
       lastLoad.current = Date.now();
-      setFarm({ key, state });
+      putFarm(key, state);
       setFarmError('');
     } catch (e) {
       setFarmError((e as Error).message);
@@ -181,27 +195,20 @@ export default function OasisPage({ roomId }: { roomId: string | null }) {
   useEffect(() => {
     if (!shared || !roomId || !worldKey) return;
     let live = true;
-    loadFarm(roomId, worldKey).then(
-      (state) => {
-        if (!live) return;
-        lastLoad.current = Date.now();
-        setFarm({ key: worldKey, state });
-        setFarmError('');
-      },
-      (e: Error) => live && setFarmError(e.message),
-    );
+    const load = (first: boolean) =>
+      loadFarm(roomId, worldKey).then(
+        (state) => {
+          if (!live) return;
+          lastLoad.current = Date.now();
+          setFarms((cur) => ({ ...cur, [worldKey]: state }));
+          setFarmError('');
+        },
+        (e: Error) => live && first && setFarmError(e.message),
+      );
+    void load(true);
     // Coming back to the tab shows teammates' ticks and pastes (at most every 30 s).
     const onVisible = () => {
-      if (document.visibilityState === 'visible' && Date.now() - lastLoad.current >= 30_000) {
-        loadFarm(roomId, worldKey).then(
-          (state) => {
-            if (!live) return;
-            lastLoad.current = Date.now();
-            setFarm({ key: worldKey, state });
-          },
-          () => {},
-        );
-      }
+      if (document.visibilityState === 'visible' && Date.now() - lastLoad.current >= 30_000) void load(false);
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
@@ -210,51 +217,75 @@ export default function OasisPage({ roomId }: { roomId: string | null }) {
     };
   }, [shared, roomId, worldKey]);
 
-  /** Merges a paste into the team's saved lists (re-read first, so two duals don't overwrite each other). */
-  const saveFromPaste = async (text: string, key: string) => {
-    if (!roomId) return;
-    const p = parsePaste(text);
-    if (p.villages.length === 0 || p.lists.length === 0) return; // the paste summary says what is wrong
-    setSaving(true);
-    try {
-      const fresh = await loadFarm(roomId, key);
-      const r = mergePaste(fresh, p, myName(), Date.now());
-      if (!r.ok) {
-        setFarm({ key, state: fresh });
-        setSaveNote({ tone: 'error', text: r.error, paste: text });
-        return;
-      }
-      await saveFarm(roomId, key, r.writes);
-      setFarm({ key, state: r.next });
-      setSaveNote({ tone: 'ok', text: reportText(r.report), paste: text });
-      void reload(key);
-    } catch (e) {
-      setSaveNote({ tone: 'error', text: (e as Error).message, paste: text });
-    } finally {
-      setSaving(false);
-    }
-  };
+  /** Merges a paste into the team's saved lists. Saves run one at a time, each on a fresh read. */
+  const saveFromPaste = useCallback(
+    (text: string, key: string, replace = false) => {
+      const put = (state: FarmState) => setFarms((cur) => ({ ...cur, [key]: state }));
+      saveChain.current = saveChain.current.then(async () => {
+        if (!roomId) return;
+        const p = parsePaste(text);
+        if (p.villages.length === 0 || p.lists.length === 0) return; // the paste summary says what is wrong
+        setSaving(true);
+        try {
+          const fresh = await loadFarm(roomId, key);
+          const r = mergePaste(fresh, p, loadPrefs().name.trim() || 'Someone', Date.now(), { replace });
+          if (!r.ok) {
+            put(fresh);
+            setSaveNote({ tone: 'error', text: r.error, paste: text, key, canReplace: r.reason === 'no-overlap' });
+            return;
+          }
+          await saveFarm(roomId, key, r.writes);
+          put(r.next);
+          setSaveNote({ tone: 'ok', text: reportText(r.report), paste: text, key });
+          // Read back, so the records carry the server's times.
+          put(await loadFarm(roomId, key));
+          lastLoad.current = Date.now();
+        } catch (e) {
+          setSaveNote({ tone: 'error', text: (e as Error).message, paste: text, key });
+        } finally {
+          setSaving(false);
+        }
+      });
+    },
+    [roomId],
+  );
+
+  // A paste is saved 0.6 s after it last changed (also one made before the server data finished loading).
+  useEffect(() => {
+    if (!shared || !roomId || !worldKey || !paste.trim()) return;
+    if (handled && handled.paste === paste && handled.key === worldKey) return;
+    const key = worldKey;
+    const text = paste;
+    const t = setTimeout(() => {
+      setHandled({ paste: text, key });
+      saveFromPaste(text, key);
+    }, 600);
+    return () => clearTimeout(t);
+  }, [shared, roomId, worldKey, paste, handled, saveFromPaste]);
 
   const onPasteChange = (text: string) => {
     setPaste(text);
     setSaveNote(null);
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    if (!shared || !worldKey || !text.trim()) return;
-    const key = worldKey;
-    saveTimer.current = setTimeout(() => void saveFromPaste(text, key), 600);
   };
 
   // The saved team state, unless this paste couldn't be saved (then the paste is shown on its own).
-  const farmState = shared && farm && farm.key === worldKey ? farm.state : null;
-  const pasteRefused = saveNote?.tone === 'error' && saveNote.paste === paste && parsed !== null;
+  const farmState = shared && worldKey ? (farms[worldKey] ?? null) : null;
+  const pasteRefused = saveNote?.tone === 'error' && saveNote.paste === paste && saveNote.key === worldKey && parsed !== null;
   const view = useMemo(() => {
-    if (farmState && !pasteRefused) return viewFromFarm(farmState, parsed?.deactivated ?? []);
+    if (farmState && !pasteRefused) {
+      const v = viewFromFarm(farmState, parsed?.deactivated ?? []);
+      // This paste's lists that couldn't be matched (so weren't saved) still count as taken.
+      const unmatched = parsed ? viewFromPaste(parsed).lists.filter((l) => l.village === null) : [];
+      return unmatched.length > 0 ? { ...v, lists: [...v.lists, ...unmatched] } : v;
+    }
     return parsed ? viewFromPaste(parsed) : null;
   }, [farmState, pasteRefused, parsed]);
   const result = useMemo(
     () => (world ? analyze(world, view, { radius: settings.radius, groups, allVillages: settings.allVillages, extraVillages: extra }) : null),
     [world, view, settings.radius, groups, settings.allVillages, extra],
   );
+  /** Ticks are shared for the team's saved villages; for a village typed in by hand they stay in this tab. */
+  const sharesTicks = (v: PastedVillage) => !!farmState && !pasteRefused && farmState.villages.some((s) => s.x === v.x && s.y === v.y);
 
   const update = (patch: Partial<Settings>) => {
     const next = { ...settings, ...patch };
@@ -270,21 +301,43 @@ export default function OasisPage({ roomId }: { roomId: string | null }) {
       return next;
     });
 
-  /** The "Added" tick: shared with the team in room mode, just this tab otherwise. */
-  const onTick = async (x: number, y: number, village: PastedVillage | null) => {
-    if (!farmState || pasteRefused || !roomId || !worldKey) {
+  /** The "Added" tick: shared with the team for a saved village, just this tab otherwise. */
+  const onTick = async (x: number, y: number, village: PastedVillage | null, share: boolean) => {
+    if (!share || !roomId || !worldKey) {
       toggleDone(`${x}|${y}`);
       return;
     }
+    const key = worldKey;
     const others = (cur: FarmState) => cur.marks.filter((m) => m.x !== x || m.y !== y);
-    setFarm((cur) =>
-      cur && {
-        ...cur,
-        state: { ...cur.state, marks: village ? [...others(cur.state), { x, y, vx: village.x, vy: village.y, by: myName(), at: Date.now() }] : others(cur.state) },
-      },
-    );
+    setFarms((cur) => {
+      const st = cur[key];
+      if (!st) return cur;
+      const marks = village ? [...others(st), { x, y, vx: village.x, vy: village.y, by: myName(), at: Date.now() }] : others(st);
+      return { ...cur, [key]: { ...st, marks } };
+    });
     try {
-      await setMark(roomId, worldKey, x, y, village, myName());
+      await setMark(roomId, key, x, y, village, myName());
+    } catch (e) {
+      setFarmError((e as Error).message);
+    }
+    void reload(key);
+  };
+
+  const onRemoveList = async (lk: string) => {
+    if (!roomId || !worldKey) return;
+    try {
+      await removeList(roomId, worldKey, lk);
+    } catch (e) {
+      setFarmError((e as Error).message);
+    }
+    void reload();
+  };
+
+  const onForget = async () => {
+    if (!roomId || !worldKey || !farmState) return;
+    try {
+      await saveFarm(roomId, worldKey, forgetWrites(farmState, myName()));
+      setSaveNote(null);
     } catch (e) {
       setFarmError((e as Error).message);
     }
@@ -335,7 +388,15 @@ export default function OasisPage({ roomId }: { roomId: string | null }) {
               list; after that, collapsed lists are fine: their saved oases are kept. Saved for your team in this room (like the timer):
               your villages’ names and coordinates, list names and counts, and the oases in them. No player names.
             </p>
-            <FarmStatus state={farmState} error={farmError} saving={saving} note={saveNote} onRefresh={() => void reload()} />
+            <FarmStatus
+              state={farmState}
+              error={farmError}
+              saving={saving}
+              note={saveNote && saveNote.key === worldKey ? saveNote : null}
+              onRefresh={() => void reload()}
+              onForget={() => void onForget()}
+              onReplace={() => saveNote && saveFromPaste(saveNote.paste, saveNote.key, true)}
+            />
           </>
         ) : (
           <p className="muted small">
@@ -421,9 +482,10 @@ export default function OasisPage({ roomId }: { roomId: string | null }) {
               v={v}
               world={world}
               radius={settings.radius}
-              sharedTicks={farmState !== null && !pasteRefused}
+              sharedTicks={sharesTicks(v.village)}
               done={done}
-              onTick={(x, y, village) => void onTick(x, y, village)}
+              onTick={(x, y, village, share) => void onTick(x, y, village, share)}
+              onRemoveList={farmState ? (lk) => void onRemoveList(lk) : undefined}
             />
           ))}
         {world && (
@@ -682,9 +744,11 @@ function VillageCard(props: {
   /** Ticks are saved for the team (room mode) instead of just this tab. */
   sharedTicks: boolean;
   done: Set<string>;
-  onTick: (x: number, y: number, village: PastedVillage | null) => void;
+  onTick: (x: number, y: number, village: PastedVillage | null, share: boolean) => void;
+  /** Removes a saved list (team state); undefined when nothing is saved. */
+  onRemoveList?: (lk: string) => void;
 }) {
-  const { v, world, radius, sharedTicks, done, onTick } = props;
+  const { v, world, radius, sharedTicks, done, onTick, onRemoveList } = props;
   const isDone = (m: MissingOasis) => !sharedTicks && done.has(`${m.x}|${m.y}`);
   const left = v.missing.filter((m) => !isDone(m)).length;
   const tickedCount = sharedTicks ? v.ticked.length : v.missing.length - left;
@@ -704,6 +768,19 @@ function VillageCard(props: {
             <span key={i} className={`chip ${l.total >= LIST_MAX ? 'full' : ''}`} title={l.known === undefined ? 'Never seen expanded' : undefined}>
               {l.name} {l.total}/{LIST_MAX}
               {l.known === undefined && l.total > 0 ? ' ?' : ''}
+              {onRemoveList && l.id && (
+                <button
+                  type="button"
+                  className="link"
+                  title="Remove this saved list (only if it no longer exists in the game)"
+                  aria-label={`Remove the saved list ${l.name}`}
+                  onClick={() => {
+                    if (confirm(`Remove the saved list “${l.name}” of ${v.village.name}? Do this only if it no longer exists in the game.`)) onRemoveList(l.id!);
+                  }}
+                >
+                  ×
+                </button>
+              )}
             </span>
           ))}
         </p>
@@ -734,10 +811,10 @@ function VillageCard(props: {
           </thead>
           <tbody>
             {v.missing.map((m) => (
-              <OasisRowView key={`${m.x}|${m.y}`} m={m} world={world} done={isDone(m)} toggle={() => onTick(m.x, m.y, isDone(m) ? null : v.village)} />
+              <OasisRowView key={`${m.x}|${m.y}`} m={m} world={world} done={isDone(m)} toggle={() => onTick(m.x, m.y, isDone(m) ? null : v.village, sharedTicks)} />
             ))}
             {sharedTicks &&
-              v.ticked.map((m) => <OasisRowView key={`t${m.x}|${m.y}`} m={m} world={world} done added={m} toggle={() => onTick(m.x, m.y, null)} />)}
+              v.ticked.map((m) => <OasisRowView key={`t${m.x}|${m.y}`} m={m} world={world} done added={m} toggle={() => onTick(m.x, m.y, null, true)} />)}
           </tbody>
         </table>
         </div>
@@ -794,10 +871,12 @@ function FarmStatus(props: {
   state: FarmState | null;
   error: string;
   saving: boolean;
-  note: { tone: 'ok' | 'error'; text: string } | null;
+  note: SaveNote | null;
   onRefresh: () => void;
+  onForget: () => void;
+  onReplace: () => void;
 }) {
-  const { state, error, saving, note, onRefresh } = props;
+  const { state, error, saving, note, onRefresh, onForget, onReplace } = props;
   const last = state ? lastSaved(state) : null;
   return (
     <div className="farm-status small">
@@ -815,9 +894,35 @@ function FarmStatus(props: {
         <button className="btn small" onClick={onRefresh} disabled={saving}>
           Refresh
         </button>
+        {state && last && (
+          <button
+            className="link small"
+            disabled={saving}
+            onClick={() => {
+              if (confirm('Forget the saved farm lists and ticks for this server, for the whole team? The next paste (every list expanded) saves them again.')) onForget();
+            }}
+          >
+            Forget saved lists
+          </button>
+        )}
         {saving && <span className="muted">Saving…</span>}
       </div>
-      {note && <p className={note.tone === 'error' ? 'error' : 'note'}>{note.text}</p>}
+      {note && (
+        <p className={note.tone === 'error' ? 'error' : 'note'}>
+          {note.text}{' '}
+          {note.canReplace && (
+            <button
+              className="btn small"
+              disabled={saving}
+              onClick={() => {
+                if (confirm('Replace the team’s saved farm lists for this server with this paste?')) onReplace();
+              }}
+            >
+              Replace the saved lists with this paste
+            </button>
+          )}
+        </p>
+      )}
       {error && <p className="error">Team farm lists: {error}</p>}
     </div>
   );

@@ -181,6 +181,15 @@ export async function saveFarm(roomId: string, key: string, writes: Extract<Merg
   }
 }
 
+/** Removes one saved list (it no longer exists in the game). */
+export async function removeList(roomId: string, key: string, lk: string): Promise<void> {
+  try {
+    await online((db) => remove(ref(db, `${farmPath(roomId, key)}/lists/${lk}`)));
+  } catch (e) {
+    throw friendly(e, 'write');
+  }
+}
+
 /** The shared "Added" tick: on (for village vx|vy) or off. */
 export async function setMark(roomId: string, key: string, x: number, y: number, village: { x: number; y: number } | null, by: string): Promise<void> {
   const path = `${farmPath(roomId, key)}/marks/${markKey(x, y)}`;

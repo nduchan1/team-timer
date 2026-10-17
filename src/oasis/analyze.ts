@@ -38,6 +38,8 @@ const vkey = (v: { x: number; y: number }) => key(v.x, v.y);
 // ---- input: what is known about the team's farm lists ----------------------------------------------
 
 export interface ListView {
+  /** Key of the saved list (team state only). */
+  id?: string;
   /** Village name, or null when the list couldn't be matched to a village. */
   village: string | null;
   /** The village's coordinates (null when unmatched). */
@@ -161,8 +163,10 @@ export interface AnalyzeOptions {
 
 export function analyze(world: OasisWorld, view: FarmView | null, opts: AnalyzeOptions): Analysis {
   const lists = view?.lists ?? [];
-  const marks = view?.marks ?? [];
   const known = view?.villages ?? [];
+  // A tick counts only for one of your villages (a lost village's ticks would hide oases for good).
+  const ownKeys = new Set(known.map(vkey));
+  const marks = (view?.marks ?? []).filter((m) => ownKeys.has(key(m.vx, m.vy)));
   const nameAt = new Map(known.map((v) => [vkey(v), v.name]));
 
   // Where each listed oasis sits: oasis key -> village names.
@@ -189,6 +193,8 @@ export function analyze(world: OasisWorld, view: FarmView | null, opts: AnalyzeO
 
   // A list never seen expanded may hold any oasis near its village: those stay back.
   const neverExpanded = lists.filter((l) => l.known === undefined && l.total > 0);
+  // ...and one that isn't matched to a village may belong to any of them: then everything waits.
+  const holdAll = neverExpanded.some((l) => l.vx === null || l.vy === null);
   const holdAreas = neverExpanded
     .filter((l) => l.vx !== null && l.vy !== null)
     .map((l) => {
@@ -217,7 +223,7 @@ export function analyze(world: OasisWorld, view: FarmView | null, opts: AnalyzeO
         }
       }
       if (!best) continue;
-      if (holdAreas.some((h) => distance(h.c, { x, y }, world.bounds) <= h.reach)) {
+      if (holdAll || holdAreas.some((h) => distance(h.c, { x, y }, world.bounds) <= h.reach)) {
         heldBy.set(vkey(best), (heldBy.get(vkey(best)) ?? 0) + 1);
         continue;
       }

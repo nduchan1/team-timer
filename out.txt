@@ -1,0 +1,6 @@
+PARSED {"villages":[{"name":"New village","x":0,"y":0},{"name":"New village","x":-100,"y":-100}],"lists":[{"village":null,"name":"NV - Oases","active":3,"total":3,"targets":[]}],"deactivated":[]}
+MERGE {"ok":false,"error":"Two of your villages are called “New village”, so their farm lists can’t be told apart. Rename one in the game, then paste again. Nothing was saved."}
+TWIN [["New village",0,["1|0","2|1","0|3"],0],["New village",-100,[],0]] {"fullLists":[],"deactivated":[],"inSeveralVillages":[],"neverExpanded":[{"village":null,"list":"NV - Oases","total":3}],"grownLists":[],"unmatchedLists":["NV - Oases"]}
+P3 [{"village":null,"name":"NV - Oases","active":3,"total":3,"targets":[]},{"village":"Home","name":"H - Oases","active":1,"total":1,"targets":[{"name":"Unoccupied oasis (5|5)","pop":0,"dist":1,"oasis":true,"occupied":false,"x":5,"y":5}]}]
+TWIN+HOME [["Home",["2|1","0|3","1|0"],0]]
+UNKNOWN [{"village":null,"name":"LV - Oases","active":3,"total":3,"targets":[]}] [["Home",3,0]] {"fullLists":[],"deactivated":[],"inSeveralVillages":[],"neverExpanded":[{"village":null,"list":"LV - Oases","total":3}],"grownLists":[],"unmatchedLists":["LV - Oases"]}

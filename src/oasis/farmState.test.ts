@@ -130,9 +130,37 @@ describe('mergePaste: later pastes with collapsed lists', () => {
     expect(a.villages.find((v) => v.village.name === 'Alpha')!.missing).toHaveLength(2);
   });
 
-  it('combines two lists with the same name in one village', () => {
-    const r = mergePaste(EMPTY_FARM, paste([list('Alpha', 'Same', 1, [oasis(1, 1)]), list('Alpha', 'Same', 1, [oasis(2, 2)])]), 'nd', 1000);
-    expect(r.ok && r.writes[`lists/${listKey(0, 0, 'Same')}`]).toMatchObject({ total: 2, known: 2, oases: '1|1,2|2' });
+  it('keeps lists with the same name in one village apart', () => {
+    const r = mergePaste(EMPTY_FARM, paste([list('Alpha', 'Same', 1, [oasis(1, 1)]), list('Alpha', 'Same', 1, [oasis(2, 2)]), list('Alpha', 'Same', 1, [oasis(3, 3)])]), 'nd', 1000);
+    expect(r.ok && r.writes[`lists/${listKey(0, 0, 'Same')}`]).toMatchObject({ n: 'Same', total: 1, oases: '1|1' });
+    expect(r.ok && r.writes[`lists/${listKey(0, 0, 'Same#2')}`]).toMatchObject({ n: 'Same', total: 1, oases: '2|2' });
+    expect(r.ok && r.writes[`lists/${listKey(0, 0, 'Same#3')}`]).toMatchObject({ n: 'Same', total: 1, oases: '3|3' });
+  });
+
+  it('gives a list renamed while collapsed the oases of the list it replaces', () => {
+    const r = mergePaste(saved, paste([list('Alpha', 'A oases renamed', 3), list('Alpha', 'A farms', 1), list('Beta', 'B oases', 1)]), 'kv', 2000);
+    if (!r.ok) throw new Error('merge failed');
+    expect(r.writes[`lists/${listKey(0, 0, 'A oases')}`]).toBeNull();
+    expect(r.writes[`lists/${listKey(0, 0, 'A oases renamed')}`]).toMatchObject({ total: 3, oases: '1|1,2|2' });
+    expect(r.writes[`lists/${listKey(0, 0, 'A oases renamed')}`]).not.toHaveProperty('known');
+    // Its oases still count as taken while it waits to be expanded.
+    const a = missing(r.next);
+    expect(a.villages.flatMap((v) => v.missing).some((m) => (m.x === 1 && m.y === 1) || (m.x === 2 && m.y === 2))).toBe(false);
+  });
+
+  it('lowers the baseline when a collapsed list shrank, so later growth still shows', () => {
+    const shrunk = mergePaste(saved, paste([list('Alpha', 'A oases', 2), list('Alpha', 'A farms', 1), list('Beta', 'B oases', 1)]), 'kv', 2000);
+    if (!shrunk.ok) throw new Error('merge failed');
+    expect(shrunk.writes[`lists/${listKey(0, 0, 'A oases')}`]).toMatchObject({ total: 2, known: 2 });
+    const grew = mergePaste(shrunk.next, paste([list('Alpha', 'A oases', 3), list('Alpha', 'A farms', 1), list('Beta', 'B oases', 1)]), 'kv', 3000);
+    if (!grew.ok) throw new Error('merge failed');
+    expect(missing(grew.next).warnings.grownLists).toEqual([{ village: 'Alpha', list: 'A oases', total: 3, known: 2 }]);
+  });
+
+  it('skips a list the rules would refuse, instead of failing the whole save', () => {
+    const r = mergePaste(EMPTY_FARM, paste([list('Alpha', 'x'.repeat(101), 1, [oasis(1, 1)]), list('Alpha', 'ok', 1, [oasis(2, 2)])]), 'nd', 1000);
+    expect(r.ok && r.report.unmatched).toEqual(['x'.repeat(101)]);
+    expect(r.ok && r.writes[`lists/${listKey(0, 0, 'ok')}`]).toMatchObject({ oases: '2|2' });
   });
 });
 
@@ -161,9 +189,31 @@ describe('mergePaste: removals and refusals', () => {
     expect(!r.ok && r.error).toMatch(/Two of your villages are called “Alpha”/);
   });
 
-  it('refuses a paste with none of the saved villages', () => {
-    const r = mergePaste(saved, paste([list('Gamma', 'G', 0)], [{ name: 'Gamma', x: 50, y: 50 }]), 'nd', 2000);
-    expect(!r.ok && r.error).toMatch(/right account and server/);
+  it('refuses a paste with none of the saved villages, unless told to replace', () => {
+    const gamma = paste([list('Gamma', 'G', 1, [oasis(51, 51)])], [{ name: 'Gamma', x: 50, y: 50 }]);
+    const r = mergePaste({ ...saved, marks: [{ x: 3, y: 3, vx: 0, vy: 0, by: 'kv', at: 1 }] }, gamma, 'nd', 2000);
+    expect(!r.ok && r.reason).toBe('no-overlap');
+    const replaced = mergePaste({ ...saved, marks: [{ x: 3, y: 3, vx: 0, vy: 0, by: 'kv', at: 1 }] }, gamma, 'nd', 2000, { replace: true });
+    if (!replaced.ok) throw new Error('replace failed');
+    expect(replaced.report.deleted).toBe(3);
+    expect(replaced.report.removedTicks).toBe(1);
+    expect(replaced.next.villages).toEqual([{ name: 'Gamma', x: 50, y: 50 }]);
+  });
+
+  it('deletes nothing, and keeps saved villages, when a list could not be matched', () => {
+    // Beta is missing from the village list, so its list comes back unmatched.
+    const r = mergePaste(saved, paste([list('Alpha', 'A oases', 3), list(null, 'B oases', 1)], [A]), 'kv', 2000);
+    if (!r.ok) throw new Error('merge failed');
+    expect(r.report.deleted).toBe(0);
+    expect(Object.values(r.writes).includes(null)).toBe(false);
+    expect(r.next.villages).toEqual([A, B]);
+    expect(r.next.lists).toHaveLength(3);
+  });
+
+  it('removes the ticks of a village that is no longer yours', () => {
+    const r = mergePaste({ ...saved, marks: [{ x: 102, y: 102, vx: 100, vy: 100, by: 'kv', at: 1 }] }, paste([list('Alpha', 'A oases', 3), list('Alpha', 'A farms', 1)], [A]), 'kv', 2000);
+    expect(r.ok && r.writes['marks/102_102']).toBeNull();
+    expect(r.ok && r.report.removedTicks).toBe(1);
   });
 
   it('refuses a paste without lists or villages', () => {
@@ -179,6 +229,12 @@ describe('mergePaste: removals and refusals', () => {
 });
 
 describe('ticks', () => {
+  it('of a village that is not one of yours hide nothing', () => {
+    const lost: StoredMark = { x: 4, y: 4, vx: 500, vy: 500, by: 'kv', at: 1 };
+    const a = missing({ ...apply(EMPTY_FARM, FULL).state, marks: [lost] });
+    expect(a.villages.find((v) => v.village.name === 'Alpha')!.missing.map((m) => [m.x, m.y])).toEqual([[3, 3], [4, 4]]);
+  });
+
   const saved = apply(EMPTY_FARM, FULL).state;
   const tick: StoredMark = { x: 3, y: 3, vx: 0, vy: 0, by: 'kv', at: 1500 };
 

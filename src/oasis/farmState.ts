@@ -136,6 +136,7 @@ export function viewFromFarm(state: FarmState, deactivated: { x: number; y: numb
     villages = [...seen.values()];
   }
   const lists: ListView[] = state.lists.map((l) => ({
+    id: l.lk,
     village: l.v,
     vx: l.vx,
     vy: l.vy,
@@ -169,6 +170,8 @@ export interface MergeReport {
   deleted: number;
   /** Ticks cleared because the oasis now shows up in a list. */
   confirmedTicks: number;
+  /** Ticks removed because their village is no longer one of yours. */
+  removedTicks: number;
   /** Lists that couldn't be matched to a village, so they weren't saved. */
   unmatched: string[];
 }
@@ -176,7 +179,7 @@ export interface MergeReport {
 export type ListRecord = Omit<StoredList, 'lk' | 'at'>;
 
 export type MergeResult =
-  | { ok: false; error: string }
+  | { ok: false; error: string; reason?: 'no-overlap' }
   | {
       ok: true;
       /** Paths under farm/{world} → new value (without "at"; the store adds the server time) or null to delete. */
@@ -188,8 +191,16 @@ export type MergeResult =
 const sameRecord = (a: ListRecord, b: StoredList) =>
   a.v === b.v && a.vx === b.vx && a.vy === b.vy && a.n === b.n && a.total === b.total && a.known === b.known && a.oases === b.oases;
 
+export interface MergeOptions {
+  /** Replace the saved lists with this paste even if none of its villages are saved (another account or server). */
+  replace?: boolean;
+}
+
+/** The rules' limits: a record outside them would make the whole save fail. */
+const fitsRules = (r: ListRecord) => r.n.length >= 1 && r.n.length <= 100 && r.v.length >= 1 && r.v.length <= 60 && r.total <= 200 && (r.known ?? 0) <= 200 && r.oases.length <= 2200;
+
 /** Merges a paste into the saved state. Lists not fully copied keep what was saved before. */
-export function mergePaste(state: FarmState, p: ParsedPaste, by: string, now: number): MergeResult {
+export function mergePaste(state: FarmState, p: ParsedPaste, by: string, now: number, opts: MergeOptions = {}): MergeResult {
   if (p.villages.length === 0 || p.lists.length === 0) {
     return { ok: false, error: 'Copy the whole Farm List page (Ctrl+A, then Ctrl+C): both the farm lists and the village list are needed.' };
   }
@@ -202,90 +213,135 @@ export function mergePaste(state: FarmState, p: ParsedPaste, by: string, now: nu
       error: `Two of your villages are called “${twins[0]}”, so their farm lists can’t be told apart. Rename one in the game, then paste again. Nothing was saved.`,
     };
   }
-  if (state.villages.length > 0 && !p.villages.some((v) => state.villages.some((s) => s.x === v.x && s.y === v.y))) {
-    return { ok: false, error: 'None of these villages are in the saved farm lists. Is this the right account and server? Nothing was saved.' };
+  if (!opts.replace && state.villages.length > 0 && !p.villages.some((v) => state.villages.some((s) => s.x === v.x && s.y === v.y))) {
+    return {
+      ok: false,
+      reason: 'no-overlap',
+      error: 'None of these villages are in the saved farm lists. Is this the right account and server? Nothing was saved.',
+    };
   }
 
   const villageOf = new Map(p.villages.map((v) => [v.name, v]));
   const stored = new Map(state.lists.map((l) => [l.lk, l]));
-  const report: MergeReport = { replaced: 0, merged: 0, kept: 0, recounted: 0, unknown: 0, deleted: 0, confirmedTicks: 0, unmatched: [] };
+  const report: MergeReport = { replaced: 0, merged: 0, kept: 0, recounted: 0, unknown: 0, deleted: 0, confirmedTicks: 0, removedTicks: 0, unmatched: [] };
 
-  // Group the pasted lists by village and name (two lists with the same name are combined).
-  const groups = new Map<string, { v: PastedVillage; n: string; total: number; rows: number; oases: { x: number; y: number }[] }>();
+  // The pasted lists by village and name. A second list with the same name gets its own key ("name#2").
+  type Group = { v: PastedVillage; n: string; total: number; rows: number; oases: { x: number; y: number }[] };
+  const groups = new Map<string, Group>();
+  const nth = new Map<string, number>();
   for (const l of p.lists) {
     const v = l.village !== null ? villageOf.get(l.village) : undefined;
     if (!v) {
       report.unmatched.push(l.name);
       continue;
     }
-    const lk = listKey(v.x, v.y, l.name);
-    const g = groups.get(lk) ?? { v, n: l.name, total: 0, rows: 0, oases: [] };
-    g.total += l.total;
-    g.rows += l.targets.length;
-    for (const t of l.targets) if (t.oasis && t.x !== null && t.y !== null) g.oases.push({ x: t.x, y: t.y });
-    groups.set(lk, g);
+    const twinKey = `${v.x}|${v.y}|${l.name}`;
+    const k = nth.get(twinKey) ?? 0;
+    nth.set(twinKey, k + 1);
+    const oases = l.targets.filter((t) => t.oasis && t.x !== null && t.y !== null).map((t) => ({ x: t.x!, y: t.y! }));
+    groups.set(listKey(v.x, v.y, k === 0 ? l.name : `${l.name}#${k + 1}`), { v, n: l.name, total: l.total, rows: l.targets.length, oases });
+  }
+  // Removals only when every list was matched: an unmatched list means the village list or a header
+  // wasn't read, not that lists or villages are gone.
+  const complete = report.unmatched.length === 0;
+  const pastedVillages = new Set([...groups.values()].map((g) => `${g.v.x}|${g.v.y}`));
+  const ownVillages = new Set(p.villages.map((v) => `${v.x}|${v.y}`));
+  const removed = complete
+    ? state.lists.filter((l) => {
+        const vk = `${l.vx}|${l.vy}`;
+        return (pastedVillages.has(vk) && !groups.has(l.lk)) || !ownVillages.has(vk);
+      })
+    : [];
+  // A list renamed while collapsed shows up as a new, never-expanded list: it takes the oases of the
+  // lists its village lost in this paste, so they still count as taken.
+  const carried = new Map<string, { x: number; y: number }[]>();
+  for (const l of removed) {
+    const vk = `${l.vx}|${l.vy}`;
+    if (ownVillages.has(vk)) carried.set(vk, [...(carried.get(vk) ?? []), ...parseOases(l.oases)]);
   }
 
   const writes: Extract<MergeResult, { ok: true }>['writes'] = {};
   const nextLists = new Map(state.lists.map((l) => [l.lk, l]));
+  const skipped = new Set<string>();
   for (const [lk, g] of groups) {
     const old = stored.get(lk);
     const base = { v: g.v.name, vx: g.v.x, vy: g.v.y, n: g.n, total: g.total, by };
+    // A count that went down while collapsed lowers the baseline, so later growth still shows.
+    const keptKnown = old?.known === undefined ? {} : { known: Math.min(old.known, g.total) };
     let rec: ListRecord;
+    let kind: 'replaced' | 'kept' | 'recounted' | 'unknown' | 'merged';
     if (g.rows >= g.total) {
       rec = { ...base, known: Math.max(g.rows, g.total), oases: oasesText(g.oases) };
-      if (!old || !sameRecord(rec, old)) report.replaced++;
+      kind = 'replaced';
     } else if (g.rows === 0) {
       if (old) {
-        rec = { ...base, ...(old.known === undefined ? {} : { known: old.known }), oases: old.oases };
-        if (old.total !== g.total) report.recounted++;
-        else report.kept++;
+        rec = { ...base, ...keptKnown, oases: old.oases };
+        kind = old.total !== g.total ? 'recounted' : 'kept';
       } else {
-        rec = { ...base, oases: '' };
-        report.unknown++;
+        const vk = `${g.v.x}|${g.v.y}`;
+        rec = { ...base, oases: oasesText(carried.get(vk) ?? []) };
+        carried.delete(vk);
+        kind = 'unknown';
       }
     } else {
-      rec = { ...base, ...(old?.known === undefined ? {} : { known: old.known }), oases: oasesText([...parseOases(old?.oases ?? ''), ...g.oases]) };
-      report.merged++;
+      rec = { ...base, ...keptKnown, oases: oasesText([...parseOases(old?.oases ?? ''), ...g.oases]) };
+      kind = 'merged';
     }
-    if (!old || !sameRecord(rec, old)) {
+    if (!fitsRules(rec)) {
+      report.unmatched.push(g.n);
+      skipped.add(lk);
+      continue;
+    }
+    const changed = !old || !sameRecord(rec, old);
+    if (kind === 'replaced') {
+      if (changed) report.replaced++;
+    } else report[kind]++;
+    if (changed) {
       const { oases, known, ...rest } = rec;
       writes[`lists/${lk}`] = { ...rest, ...(known === undefined ? {} : { known }), ...(oases ? { oases } : {}) } as ListRecord;
       nextLists.set(lk, { ...rec, lk, at: now });
     }
   }
-
-  // Removed lists: only for villages that have lists in this paste. Lists of lost villages go too.
-  const pastedVillages = new Set([...groups.values()].map((g) => `${g.v.x}|${g.v.y}`));
-  const ownVillages = new Set(p.villages.map((v) => `${v.x}|${v.y}`));
-  for (const l of state.lists) {
-    const vk = `${l.vx}|${l.vy}`;
-    if ((pastedVillages.has(vk) && !groups.has(l.lk)) || !ownVillages.has(vk)) {
+  if (skipped.size === 0) {
+    for (const l of removed) {
       writes[`lists/${l.lk}`] = null;
       nextLists.delete(l.lk);
       report.deleted++;
     }
   }
 
-  const villageText = JSON.stringify(p.villages.map((v) => ({ name: v.name, x: v.x, y: v.y })));
+  // The village list: this paste's, plus (when something wasn't matched) saved villages it lacks.
+  const villages = p.villages.map((v) => ({ name: v.name, x: v.x, y: v.y }));
+  if (!complete) for (const sv of state.villages) if (!ownVillages.has(`${sv.x}|${sv.y}`)) villages.push(sv);
+  const villageText = JSON.stringify(villages);
   if (villageText !== JSON.stringify(state.villages.map((v) => ({ name: v.name, x: v.x, y: v.y })))) writes.villages = { list: villageText, by };
 
-  // Ticks for oases that now show up in a list are done.
+  // Ticks are done once their oasis is in a list, and go with a village that is no longer yours.
   const listed = new Set<string>();
   for (const l of nextLists.values()) for (const o of parseOases(l.oases)) listed.add(`${o.x}|${o.y}`);
   const marks = state.marks.filter((m) => {
-    if (!listed.has(`${m.x}|${m.y}`)) return true;
+    const gone = complete && !ownVillages.has(`${m.vx}|${m.vy}`);
+    if (!gone && !listed.has(`${m.x}|${m.y}`)) return true;
     writes[`marks/${markKey(m.x, m.y)}`] = null;
-    report.confirmedTicks++;
+    if (gone) report.removedTicks++;
+    else report.confirmedTicks++;
     return false;
   });
 
   const next: FarmState = {
-    villages: p.villages.map((v) => ({ name: v.name, x: v.x, y: v.y })),
+    villages,
     villagesBy: writes.villages ? by : state.villagesBy,
     villagesAt: writes.villages ? now : state.villagesAt,
     lists: [...nextLists.values()],
     marks,
   };
   return { ok: true, writes, report, next };
+}
+
+/** Writes that clear the saved state for a world (the rules don't allow deleting the village list itself). */
+export function forgetWrites(state: FarmState, by: string): Extract<MergeResult, { ok: true }>['writes'] {
+  const writes: Extract<MergeResult, { ok: true }>['writes'] = { villages: { list: '[]', by } };
+  for (const l of state.lists) writes[`lists/${l.lk}`] = null;
+  for (const m of state.marks) writes[`marks/${markKey(m.x, m.y)}`] = null;
+  return writes;
 }

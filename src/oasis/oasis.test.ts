@@ -178,6 +178,23 @@ describe('analyze', () => {
     expect(analyze(WORLD, viewFromPaste(p), { radius: 20, groups: ALL, allVillages: false }).warnings.neverExpanded).toEqual([]);
   });
 
+  it('holds everything back while a never-expanded list has no village', () => {
+    // V2 is missing from the village list, and its list wasn't fully copied this time.
+    const p2 = parsePaste(PASTE.replace(`V2 Edge\r\n${c(200, 0)}`, ''));
+    const view = viewFromPaste(p2);
+    view.lists[2] = { ...view.lists[2], known: undefined };
+    expect(view.lists[2]).toMatchObject({ village: null, vx: null });
+    const a = analyze(WORLD, view, { radius: 20, groups: ALL, allVillages: false });
+    expect(a.villages.every((v) => v.missing.length === 0)).toBe(true);
+    expect(a.villages[0].heldBack).toBeGreaterThan(0);
+  });
+
+  it('never takes a number line of the previous list for a village name', () => {
+    // A village called "1" (Travian allows it): the rows' troop-count lines are "1" too.
+    const p2 = parsePaste(PASTE.replace(`V3 Nolists\r\n${c(-50, -50)}`, `1\r\n${c(-50, -50)}`));
+    expect(p2.lists.map((l) => l.village)).toEqual(['V1 Alpha', 'V1 Alpha', 'V2 Edge']);
+  });
+
   it('does not give a village’s lists to the previous village when its name is unknown', () => {
     const p2 = parsePaste(PASTE.replace(`V2 Edge\r\n${c(200, 0)}`, ''));
     expect(p2.lists.map((l) => l.village)).toEqual(['V1 Alpha', 'V1 Alpha', null]);
