@@ -11,6 +11,9 @@ const config = {
 /** Without a Firebase config the app runs in local mode (tabs of this browser only). */
 export const firebaseConfigured = Boolean(config.apiKey && config.databaseURL);
 
+/** The database's address, for the oasis helper's large uploads and downloads over its REST API. */
+export const databaseURL = (config.databaseURL ?? '').replace(/\/+$/, '');
+
 let db: Database | null = null;
 
 export function getDb(): Database {

@@ -3,11 +3,13 @@
 //   team       uploaded once by a teammate, kept in the room on Firebase:
 //                rooms/{room}/oasisIndex/{world key}  {world, serverUrl, scannedAt, count, by, at}
 //                rooms/{room}/oasisData/{world key}   the compact world as one JSON string
-// The helper connects to Firebase only while it reads or writes, so an open helper tab doesn't hold
-// one of the free plan's connections.
+// Small reads and writes use the helper's own Firebase connection, which stays open while the page is
+// open. (Switching it off right after a read made the SDK note a "websocket failure" in this browser, so
+// the next connections started on slow long polling and a 360 KB upload timed out.) The scan itself
+// (hundreds of KB) goes over the database's REST API: one request, whatever the connection does.
 
-import { child, get, goOffline, goOnline, ref, remove, serverTimestamp, update, type Database } from 'firebase/database';
-import { firebaseConfigured, getHelperDb } from '../sync/firebase.ts';
+import { get, ref, remove, serverTimestamp, update, type Database } from 'firebase/database';
+import { databaseURL, firebaseConfigured, getHelperDb } from '../sync/firebase.ts';
 import { markKey, parseFarm, type FarmState, type MergeResult } from './farmState.ts';
 import { compactScan, metaOf, worldKey, type OasisWorld, type WorldMeta } from './scanFormat.ts';
 
@@ -54,22 +56,26 @@ export async function loadBuiltIn(key: string): Promise<OasisWorld> {
   return compactScan(await fetchJson(`${BASE}${key}.json`));
 }
 
-let users = 0;
-
-/**
- * Runs fn with the helper's own connection online, and takes it offline again once nothing is pending.
- * It stays online until the request settles even after the timeout fired, so a slow write is never left
- * queued for a later reconnect.
- */
+/** Runs fn on the helper's own connection; the timeout only decides when to tell the player. */
 function online<T>(fn: (db: Database) => Promise<T>): Promise<T> {
-  const db = getHelperDb();
-  if (users++ === 0) goOnline(db);
-  const work = fn(db);
-  const done = () => {
-    if (--users === 0) goOffline(db);
-  };
-  work.then(done, done);
-  return withTimeout(work, 20_000);
+  return withTimeout(fn(getHelperDb()), 20_000);
+}
+
+/** A request to the database's REST API (same rules as the SDK). Refusals come back as permission_denied. */
+async function rest(path: string, init: RequestInit = {}): Promise<unknown> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 60_000);
+  try {
+    const res = await fetch(`${databaseURL}/${path}.json`, { ...init, signal: ctl.signal, cache: 'no-store' });
+    if (res.status === 401 || res.status === 403) throw new Error('permission_denied');
+    if (!res.ok) throw new Error(`The server answered ${res.status}. Try again.`);
+    return (await res.json()) as unknown;
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') throw new Error('No answer from the server. Check the connection and try again.');
+    throw e;
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 let saving: Promise<unknown> | null = null;
@@ -121,8 +127,7 @@ export async function listTeam(roomId: string): Promise<WorldEntry[]> {
 
 export async function loadTeam(roomId: string, key: string): Promise<OasisWorld> {
   try {
-    const snap = await online((db) => get(ref(db, `rooms/${roomId}/oasisData/${key}`)));
-    const text = snap.val();
+    const text = await rest(`rooms/${roomId}/oasisData/${key}`);
     if (typeof text !== 'string') throw new Error('This world’s data is missing.');
     return compactScan(JSON.parse(text));
   } catch (e) {
@@ -137,12 +142,14 @@ export async function saveTeam(roomId: string, world: OasisWorld, by: string): P
   if (data.length > MAX_DATA_CHARS) throw new Error(`This scan is too big to share (${Math.round(data.length / 1000)} k characters; the limit is ${MAX_DATA_CHARS / 1000} k).`);
   const name = (by.trim() || 'Someone').slice(0, 24);
   if (saving) throw new Error('The last upload is still being saved. Wait a moment.');
-  const write = online((db) =>
-    update(child(ref(db, 'rooms'), roomId), {
-      [`oasisIndex/${meta.key}`]: { world: meta.world, serverUrl: meta.serverUrl, scannedAt: meta.scannedAt, count: meta.count, by: name, at: serverTimestamp() },
+  // One multi-path PATCH: the rules need the index and the data written together.
+  const write = rest(`rooms/${roomId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      [`oasisIndex/${meta.key}`]: { world: meta.world, serverUrl: meta.serverUrl, scannedAt: meta.scannedAt, count: meta.count, by: name, at: { '.sv': 'timestamp' } },
       [`oasisData/${meta.key}`]: data,
     }),
-  );
+  });
   saving = write;
   write.then(
     () => (saving = null),
