@@ -78,7 +78,9 @@ describe('mergePaste: first paste', () => {
   it('changes nothing when the same paste comes again', () => {
     const once = apply(EMPTY_FARM, FULL).state;
     const twice = mergePaste(once, FULL, 'kv', 2000);
-    expect(twice.ok && Object.keys(twice.writes)).toEqual([]);
+    // Only the village list, whose time is the team's "last paste".
+    expect(twice.ok && Object.keys(twice.writes)).toEqual(['villages']);
+    expect(twice.ok && twice.next.villagesBy).toBe('kv');
   });
 });
 
@@ -88,8 +90,13 @@ describe('mergePaste: later pastes with collapsed lists', () => {
   it('keeps the saved oases of a collapsed list', () => {
     const r = mergePaste(saved, paste([list('Alpha', 'A oases', 3), list('Alpha', 'A farms', 1), list('Beta', 'B oases', 1)]), 'kv', 2000);
     expect(r.ok && r.report).toMatchObject({ kept: 3, replaced: 0, recounted: 0 });
-    expect(r.ok && Object.keys(r.writes)).toEqual([]);
+    expect(r.ok && Object.keys(r.writes)).toEqual(['villages']);
     expect(missing(r.ok ? r.next : saved).villages.find((v) => v.village.name === 'Alpha')!.missing.map((m) => [m.x, m.y])).toEqual([[3, 3], [4, 4]]);
+  });
+
+  it('moves the “last paste” time and name even when nothing changed', () => {
+    const r = mergePaste(saved, paste([list('Alpha', 'A oases', 3), list('Alpha', 'A farms', 1), list('Beta', 'B oases', 1)]), 'kv', 5000);
+    expect(r.ok && lastSaved(r.next)).toEqual({ at: 5000, by: 'kv' });
   });
 
   it('replaces a list that was expanded again', () => {

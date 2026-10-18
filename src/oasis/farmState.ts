@@ -314,8 +314,8 @@ export function mergePaste(state: FarmState, p: ParsedPaste, by: string, now: nu
   // The village list: this paste's, plus (when something wasn't matched) saved villages it lacks.
   const villages = p.villages.map((v) => ({ name: v.name, x: v.x, y: v.y }));
   if (!complete) for (const sv of state.villages) if (!ownVillages.has(`${sv.x}|${sv.y}`)) villages.push(sv);
-  const villageText = JSON.stringify(villages);
-  if (villageText !== JSON.stringify(state.villages.map((v) => ({ name: v.name, x: v.x, y: v.y })))) writes.villages = { list: villageText, by };
+  // Written on every paste (even when nothing else changed): its time is the team's "last paste".
+  writes.villages = { list: JSON.stringify(villages), by };
 
   // Ticks are done once their oasis is in a list, and go with a village that is no longer yours.
   const listed = new Set<string>();
@@ -331,8 +331,8 @@ export function mergePaste(state: FarmState, p: ParsedPaste, by: string, now: nu
 
   const next: FarmState = {
     villages,
-    villagesBy: writes.villages ? by : state.villagesBy,
-    villagesAt: writes.villages ? now : state.villagesAt,
+    villagesBy: by,
+    villagesAt: now,
     lists: [...nextLists.values()],
     marks,
   };
