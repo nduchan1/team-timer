@@ -48,6 +48,8 @@ const COORD_LINE = /^\s*\((-?\d{1,3})\|(-?\d{1,3})\)\s*$/;
 const COORDS = /\((-?\d{1,3})\|(-?\d{1,3})\)/g;
 const RAIDED = /^(\d+)\/(\d+) being raided$/;
 const TARGET = /^\t+(.+?)\t([\d,.]+)\t(\d+(?:\.\d+)?)\t?\s*$/;
+/** A list's last lines. An empty list has no Start button, so it ends with "Add target 0/100". */
+const LIST_END = /^(?:Start \(\d+\)|Add target \d+\/\d+|No target selected|Last raid)$/;
 
 const num = (s: string) => Number(s.replace(/[,.](?=\d{3}\b)/g, ''));
 
@@ -94,7 +96,7 @@ export function parsePaste(text: string): ParsedPaste {
       const n = nameCount.get(header) ?? 0;
       if (n === 1) village = header;
       else if (n > 1) village = null; // two own villages with this name
-      else if (header && !/^Start \(\d+\)$/.test(header) && !RAIDED.test(header) && !/^[\d,.:\s]+$/.test(header)) village = null; // unknown village
+      else if (header && !LIST_END.test(header) && !RAIDED.test(header) && !/^[\d,.:\s]+$/.test(header)) village = null; // unknown village
       lastRaided = i;
       current = { village, name: listName, active: Number(raided[1]), total: Number(raided[2]), targets: [] };
       lists.push(current);

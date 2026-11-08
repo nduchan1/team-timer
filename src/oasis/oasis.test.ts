@@ -128,6 +128,31 @@ describe('parsePaste', () => {
     ]);
   });
 
+  it('reads empty lists, which the game copies without a Start button', () => {
+    // As copied on ts33 (Nov 2026): "0/0 being raided", then "Add target 0/100" ends the list.
+    const empty = (name: string) => [name, `${L}${L}0${R}/${L}0${R}${R} being raided`, `Add target ${L}${L}0${R}/${L}100${R}${R}`];
+    const text = [
+      'Farm List',
+      'V1 Alpha',
+      ...empty('V1 - Steppes'),
+      ...empty('V1 - Steppes 2'),
+      ...empty('V1 - Scouts'),
+      'V2 Edge',
+      ...empty('V2 - Oases'),
+      'Villages 2/2',
+      'V1 Alpha',
+      c(10, 10),
+      'V2 Edge',
+      c(200, 0),
+    ].join('\r\n');
+    expect(parsePaste(text).lists.map((l) => [l.village, l.name, l.total])).toEqual([
+      ['V1 Alpha', 'V1 - Steppes', 0],
+      ['V1 Alpha', 'V1 - Steppes 2', 0],
+      ['V1 Alpha', 'V1 - Scouts', 0],
+      ['V2 Edge', 'V2 - Oases', 0],
+    ]);
+  });
+
   it('reads the deactivated banner', () => {
     expect(p.deactivated).toEqual([{ x: -199, y: 4 }]);
   });
