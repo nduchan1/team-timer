@@ -10,7 +10,7 @@
 
 import { get, ref, remove, serverTimestamp, update, type Database } from 'firebase/database';
 import { databaseURL, firebaseConfigured, getHelperDb } from '../sync/firebase.ts';
-import { markKey, parseFarm, type FarmState, type MergeResult } from './farmState.ts';
+import { markKey, parseFarm, type FarmState, type FarmWrites } from './farmState.ts';
 import { compactScan, metaOf, worldKey, type OasisWorld, type WorldMeta } from './scanFormat.ts';
 
 export type Source = 'built-in' | 'team' | 'this tab';
@@ -177,7 +177,7 @@ export async function loadFarm(roomId: string, key: string): Promise<FarmState> 
 }
 
 /** Writes a merge's changes in one update; every record gets the server time. */
-export async function saveFarm(roomId: string, key: string, writes: Extract<MergeResult, { ok: true }>['writes']): Promise<void> {
+export async function saveFarm(roomId: string, key: string, writes: FarmWrites): Promise<void> {
   const data: Record<string, unknown> = {};
   for (const [path, value] of Object.entries(writes)) data[path] = value === null ? null : { ...value, at: serverTimestamp() };
   if (Object.keys(data).length === 0) return;

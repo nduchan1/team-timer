@@ -19,17 +19,30 @@ export function groupOf(bonus: string): OasisGroup {
 }
 
 /**
- * Distance on a map that wraps around at the edges, as the game measures it. The bounds are the scanned
- * area; the world is at least the standard -200..200 map (a scan of part of the map doesn't shrink it).
+ * Steps between two fields on a map that wraps around at the edges. The bounds are the scanned area; the
+ * world is at least the standard -200..200 map (a scan of part of the map doesn't shrink it).
  */
-export function distance(a: { x: number; y: number }, b: { x: number; y: number }, bounds: Bounds): number {
+function wrapDelta(a: { x: number; y: number }, b: { x: number; y: number }, bounds: Bounds): [number, number] {
   const r = Math.max(200, -bounds.minX, bounds.maxX, -bounds.minY, bounds.maxY);
   const size = 2 * r + 1;
-  let dx = Math.abs(a.x - b.x) % size;
-  let dy = Math.abs(a.y - b.y) % size;
-  dx = Math.min(dx, size - dx);
-  dy = Math.min(dy, size - dy);
+  const dx = Math.abs(a.x - b.x) % size;
+  const dy = Math.abs(a.y - b.y) % size;
+  return [Math.min(dx, size - dx), Math.min(dy, size - dy)];
+}
+
+/** Distance on a map that wraps around at the edges, as the game measures it. */
+export function distance(a: { x: number; y: number }, b: { x: number; y: number }, bounds: Bounds): number {
+  const [dx, dy] = wrapDelta(a, b, bounds);
   return Math.hypot(dx, dy);
+}
+
+/**
+ * The squared distance: a whole number, so equal distances compare equal. (Math.hypot can differ in the
+ * last bit for equal squares: hypot(7, 6) and hypot(9, 2) are both √85 but don't compare equal.)
+ */
+export function distance2(a: { x: number; y: number }, b: { x: number; y: number }, bounds: Bounds): number {
+  const [dx, dy] = wrapDelta(a, b, bounds);
+  return dx * dx + dy * dy;
 }
 
 const key = (x: number, y: number) => `${x}|${y}`;

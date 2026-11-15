@@ -178,12 +178,17 @@ export interface MergeReport {
 
 export type ListRecord = Omit<StoredList, 'lk' | 'at'>;
 
+/** An "Added" tick as written (the store adds the server time). */
+export type MarkRecord = { vx: number; vy: number; by: string };
+
+/** Paths under farm/{world} → new value (without "at"; the store adds the server time) or null to delete. */
+export type FarmWrites = Record<string, ListRecord | { list: string; by: string } | MarkRecord | null>;
+
 export type MergeResult =
   | { ok: false; error: string; reason?: 'no-overlap' }
   | {
       ok: true;
-      /** Paths under farm/{world} → new value (without "at"; the store adds the server time) or null to delete. */
-      writes: Record<string, ListRecord | { list: string; by: string } | null>;
+      writes: FarmWrites;
       report: MergeReport;
       next: FarmState;
     };
@@ -260,7 +265,7 @@ export function mergePaste(state: FarmState, p: ParsedPaste, by: string, now: nu
     if (ownVillages.has(vk)) carried.set(vk, [...(carried.get(vk) ?? []), ...parseOases(l.oases)]);
   }
 
-  const writes: Extract<MergeResult, { ok: true }>['writes'] = {};
+  const writes: FarmWrites = {};
   const nextLists = new Map(state.lists.map((l) => [l.lk, l]));
   const skipped = new Set<string>();
   for (const [lk, g] of groups) {
@@ -340,8 +345,8 @@ export function mergePaste(state: FarmState, p: ParsedPaste, by: string, now: nu
 }
 
 /** Writes that clear the saved state for a world (the rules don't allow deleting the village list itself). */
-export function forgetWrites(state: FarmState, by: string): Extract<MergeResult, { ok: true }>['writes'] {
-  const writes: Extract<MergeResult, { ok: true }>['writes'] = { villages: { list: '[]', by } };
+export function forgetWrites(state: FarmState, by: string): FarmWrites {
+  const writes: FarmWrites = { villages: { list: '[]', by } };
   for (const l of state.lists) writes[`lists/${l.lk}`] = null;
   for (const m of state.marks) writes[`marks/${markKey(m.x, m.y)}`] = null;
   return writes;

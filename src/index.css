@@ -801,3 +801,58 @@ a.btn {
 .added-by {
   white-space: nowrap;
 }
+
+/* oasis helper: oases to move */
+.oasis-page .move-steps {
+  gap: 6px;
+  margin: 8px 0;
+}
+.oasis-page .move-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 8px;
+}
+.oasis-page .move-card select {
+  max-width: 100%;
+}
+.oasis-page .move-when {
+  border-left: 3px solid var(--amber);
+  padding-left: 8px;
+}
+.oasis-page .move-howto {
+  margin: 6px 0;
+  padding-left: 1.4em;
+}
+.oasis-page .move-howto li {
+  margin: 3px 0;
+}
+.oasis-page .move-paste {
+  min-height: 0;
+  height: 3.2em;
+  resize: none;
+}
+.oasis-page .move-table {
+  width: auto;
+  min-width: 260px;
+}
+.oasis-page .move-table th {
+  white-space: nowrap;
+}
+.oasis-page .move-check {
+  margin: 6px 0;
+}
+.oasis-page .move-check ul,
+.oasis-page .move-alarm ul {
+  margin: 4px 0;
+  padding-left: 1.2em;
+}
+.oasis-page .move-check li {
+  margin: 2px 0;
+}
+.oasis-page .move-check .ok {
+  color: var(--green);
+}
+.oasis-page .move-alarm-line {
+  margin: 8px 0;
+}
